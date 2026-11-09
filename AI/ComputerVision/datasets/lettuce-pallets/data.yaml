@@ -1,0 +1,17 @@
+names:
+- Ready
+- empty_pod
+- germination
+- pod
+- young
+nc: 5
+path: D:/Uni/IoT/Final/AI/ComputerVision/datasets/lettuce-pallets
+roboflow:
+  license: CC BY 4.0
+  project: lettuce-pallets
+  url: https://universe.roboflow.com/roboflow-100/lettuce-pallets/dataset/1
+  version: 1
+  workspace: roboflow-100
+test: test/images
+train: train/images
+val: valid/images

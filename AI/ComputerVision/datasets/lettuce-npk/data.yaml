@@ -1,0 +1,7 @@
+# Metadata only. For YOLO classification, pass this directory as data.
+path: "D:/Uni/IoT/Final/AI/ComputerVision/datasets/lettuce-npk"
+train: train
+val: val
+test: test
+nc: 4
+names: ["fully_nourished", "nitrogen_deficient", "phosphorus_deficient", "potassium_deficient"]
