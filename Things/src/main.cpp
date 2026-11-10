@@ -1,74 +1,126 @@
-
 #include <Arduino.h>
+#include <WiFi.h>
 
+#include "config/Config.h"
+
+#include "Identity/DeviceIdentity.h"
 #include "Sensors/SensorManager.h"
 
-#define SOIL_PIN 26
-#define DHT_PIN 27
+#include "Telemetry/TelemetryBuilder.h"
+#include "MQTT/MQTTClient.h"
 
-#define SOIL_DRY_VALUE 3200
-#define SOIL_WET_VALUE 1400
-
+// Sensor configuration
 SensorManager sensorManager(
-    SOIL_PIN,
-    DHT_PIN,
-    SOIL_DRY_VALUE,
-    SOIL_WET_VALUE
+    27,     // Soil moisture pin
+    26,     // DHT22 pin
+    3200,   // Dry calibration
+    1400    // Wet calibration
 );
 
-unsigned long lastReadTime = 0;
+// Identity
+DeviceIdentity deviceIdentity;
 
-const unsigned long READ_INTERVAL = 5000;
+// Telemetry
+TelemetryBuilder telemetryBuilder(
+    Config::SITE_ID,
+    Config::ZONE_ID
+);
+
+// MQTT
+MQTTClient mqttClient;
+
+bool mqttInitialized = false;
+
+uint32_t lastTelemetryTime = 0;
 
 void setup() {
     Serial.begin(115200);
 
+    // 1. Initialize identity
+    deviceIdentity.begin();
+
+    Serial.println("========== IDENTITY ==========");
+    Serial.println(deviceIdentity.getNodeId());
+    Serial.println(deviceIdentity.getBootId());
+
+    // 2. Initialize sensors
     sensorManager.begin();
+
+    // 3. Connect WiFi (temporary test)
+    WiFi.mode(WIFI_STA);
+    WiFi.begin("vivo x90", "22224444");
+
+    Serial.print("[WIFI] Connecting");
+
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+        Serial.print(".");
+    }
+
+    Serial.println("\n[WIFI] Connected!");
+    Serial.println(WiFi.localIP());
+
+    // 4. Initialize MQTT
+    mqttClient.begin(
+    "550e8400-e29b-41d4-a716-446655440000",
+    deviceIdentity.getNodeId(),
+    Config::MQTT_HOST,
+    Config::MQTT_PORT,
+    Config::MQTT_USERNAME,
+    Config::MQTT_PASSWORD
+    );  
+
+    mqttInitialized = true;
 }
 
 void loop() {
-    unsigned long currentTime = millis();
+    // Wait for WiFi before initializing MQTT.
+    if (WiFi.isConnected() && !mqttInitialized) {
+        mqttClient.begin(
+            /* edgeId: lấy từ ConfigStorage */
+            "YOUR_EDGE_UUID",
 
-    if (currentTime - lastReadTime >= READ_INTERVAL) {
-        lastReadTime = currentTime;
+            deviceIdentity.getNodeId(),
 
-        SensorData data = sensorManager.readAll();
+            Config::MQTT_HOST,
+            Config::MQTT_PORT,
 
-        Serial.println("\n========== SENSOR DATA ==========");
+            Config::MQTT_USERNAME,
+            Config::MQTT_PASSWORD
+        );
 
-        // Soil Sensor
-        Serial.println("[SOIL SENSOR]");
+        mqttInitialized = true;
+    }
 
-        if (data.soil.isValid) {
-            Serial.printf("Raw: %d\n", data.soil.rawValue);
+    mqttClient.loop();
 
-            Serial.printf(
-                "Moisture: %.2f%%\n",
-                data.soil.moisturePercent
-            );
-        }
-        else {
-            Serial.println("Invalid reading!");
-        }
+    if (!mqttClient.isConnected()) {
+        return;
+    }
 
-        // DHT22
-        Serial.println("\n[DHT22]");
+    uint32_t currentTime = millis();
 
-        if (data.dht.isValid) {
-            Serial.printf(
-                "Temperature: %.2f C\n",
-                data.dht.temperature
-            );
+    if (currentTime - lastTelemetryTime >=
+        Config::TELEMETRY_INTERVAL_MS) {
 
-            Serial.printf(
-                "Humidity: %.2f %%RH\n",
-                data.dht.humidity
-            );
-        }
-        else {
-            Serial.println("Invalid reading!");
-        }
+        lastTelemetryTime = currentTime;
 
-        Serial.println("=================================");
+        // Read sensors
+        SensorData sensorData = sensorManager.readAll();
+
+        // Build telemetry
+        TelemetryData telemetry = telemetryBuilder.build(
+            sensorData,
+            deviceIdentity
+        );
+
+        // Convert to JSON
+        String payload = telemetryBuilder.toJson(telemetry);
+
+        // Publish
+        Serial.println("\n[TELEMETRY]");
+        Serial.println(payload);
+
+        mqttClient.publishTelemetry(payload);
     }
 }

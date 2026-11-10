@@ -6,13 +6,13 @@
 
 #include "Sensors\SensorData\SensorData.h"
 
-class DHT11Sensor {
+class DHT22Sensor {
 private:
     int m_pin;
     DHTesp m_dht;
 
 public:
-    explicit DHT11Sensor(int pin);
+    explicit DHT22Sensor(int pin);
 
     void begin();
 
