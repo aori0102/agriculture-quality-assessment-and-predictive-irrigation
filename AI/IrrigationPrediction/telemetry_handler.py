@@ -19,16 +19,28 @@ class TelemetryHandler:
         with cfg_path.open(encoding="utf-8-sig") as file:
             cfg.read_file(file)
 
-        self.sensors_path = Path(cfg.get("sensors", "sensors_history_path"))
-        if not self.sensors_path.exists():
-            self.sensors_path.touch()
+        self.sensors_path = Path(__file__).with_name(cfg.get("sensors", "sensors_history_path"))
+        try:
+            with self.sensors_path.open("rb") as file:
+                first_line = file.readline().decode("utf-8-sig")
+                header = next(csv.reader([first_line], strict=True), [])
+        except (FileNotFoundError, UnicodeDecodeError, csv.Error):
+            header = []
+
+        if header != SENSORS_FIELDS:
             with self.sensors_path.open("w", newline="", encoding="utf-8") as file:
                 writer = csv.DictWriter(file, fieldnames=SENSORS_FIELDS)
                 writer.writeheader()
-                
-        self.irrigation_path = Path(cfg.get("irrigation", "irrigation_history_path"))
-        if not self.irrigation_path.exists():
-            self.irrigation_path.touch()
+
+        self.irrigation_path = Path(__file__).with_name(cfg.get("irrigation", "irrigation_history_path"))
+        try:
+            with self.irrigation_path.open("rb") as file:
+                first_line = file.readline().decode("utf-8-sig")
+                header = next(csv.reader([first_line], strict=True), [])
+        except (FileNotFoundError, UnicodeDecodeError, csv.Error):
+            header = []
+            
+        if header != IRRIGATION_FIELDS:
             with self.irrigation_path.open("w", newline="", encoding="utf-8") as file:
                 writer = csv.DictWriter(file, fieldnames=IRRIGATION_FIELDS)
                 writer.writeheader()
