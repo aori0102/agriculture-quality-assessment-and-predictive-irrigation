@@ -1,0 +1,11 @@
+TIMESTAMP = "timestamp"
+SOIL_MOISTURE_PERCENTAGE = "soil_moisture_pct"
+SOIL_CHANGE_10M = "soil_change_10m"
+AIR_TEMP_C = "air_temp_c"
+AIR_RELATIVE_HUMIDITY_PERCENTAGE = "air_rh_pct"
+IRRIGATION_10M = "irrigation_10m"
+
+SATURATION_POINT = "saturation_point"
+FIELD_CAPACITY = "field_capacity"
+PERMANENT_WILTING_POINT = "permanent_wilting_point"
+MANAGEMENT_ALLOWED_DEPLETION_POINT = "management_allowed_depletion_point"

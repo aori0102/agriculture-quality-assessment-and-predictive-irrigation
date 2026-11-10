@@ -1,0 +1,7 @@
+{
+    "plant_name" : "Lettuce",
+    "permanent_wilting_point" : 10.0,
+    "management_allowed_depletion_point" : 18.4,
+    "field_capacity" : 22.0,
+    "saturation_point" : 41.0
+}
