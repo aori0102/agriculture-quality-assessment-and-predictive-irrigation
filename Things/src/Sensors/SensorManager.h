@@ -11,7 +11,7 @@
 class SensorManager {
 private:
     SoilMoistureSensor m_soilSensor;
-    DHT11Sensor m_dhtSensor;
+    DHT22Sensor m_dhtSensor;
 
 public:
     SensorManager(

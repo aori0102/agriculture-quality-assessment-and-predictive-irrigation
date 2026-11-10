@@ -1,16 +1,15 @@
-
-#include "DHT22Sensor.h"
+#include "Sensors/DHT22/DHT22Sensor.h"
 #include <math.h>
 
-DHT11Sensor::DHT11Sensor(int pin) {
+DHT22Sensor::DHT22Sensor(int pin) {
     m_pin = pin;
 }
 
-void DHT11Sensor::begin() {
+void DHT22Sensor::begin() {
     m_dht.setup(m_pin, DHTesp::DHT11);
 }
 
-DHT22Data DHT11Sensor::read() {
+DHT22Data DHT22Sensor::read() {
     DHT22Data result;
 
     TempAndHumidity data = m_dht.getTempAndHumidity();
