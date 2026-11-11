@@ -1,3 +1,4 @@
+
 #include "MQTTClient.h"
 
 #include <WiFi.h>
@@ -5,8 +6,8 @@
 #include "TopicBuilder.h"
 
 void MQTTClient::begin(
-    const String& edgeId,
-    const String& nodeId,
+    const String& siteId,
+    const String& deviceId,
     const String& brokerHost,
     uint16_t brokerPort,
     const String& username,
@@ -18,14 +19,16 @@ void MQTTClient::begin(
     m_username = username;
     m_password = password;
 
-    m_clientId = nodeId;
+    // Use ESP32 MAC address as MQTT client ID.
+    m_clientId = deviceId;
 
+    // Build telemetry topic.
     m_telemetryTopic = TopicBuilder::telemetryTopic(
-        edgeId,
-        nodeId
+        siteId,
+        deviceId
     );
 
-    // MQTT broker configuration
+    // MQTT broker configuration.
     m_client.setServer(m_host.c_str(), m_port);
     m_client.setClientId(m_clientId.c_str());
     m_client.setKeepAlive(60);
@@ -37,7 +40,7 @@ void MQTTClient::begin(
         );
     }
 
-    // Connected callback
+    // Connected callback.
     m_client.onConnect([](bool sessionPresent) {
         Serial.println("[MQTT] Connected to broker");
 
@@ -45,7 +48,7 @@ void MQTTClient::begin(
         Serial.println(sessionPresent);
     });
 
-    // Disconnected callback
+    // Disconnected callback.
     m_client.onDisconnect([](
         espMqttClientTypes::DisconnectReason reason
     ) {
@@ -53,7 +56,7 @@ void MQTTClient::begin(
         Serial.println(static_cast<uint8_t>(reason));
     });
 
-    // QoS 1 publish acknowledgement
+    // QoS 1 publish acknowledgement.
     m_client.onPublish([](uint16_t packetId) {
         Serial.print("[MQTT] Publish acknowledged. Packet ID: ");
         Serial.println(packetId);
@@ -107,7 +110,7 @@ bool MQTTClient::publishTelemetry(const String& payload) {
         return false;
     }
 
-    // QoS 1, retain = false
+    // QoS 1, retain = false.
     uint16_t packetId = m_client.publish(
         m_telemetryTopic.c_str(),
         1,
@@ -121,6 +124,7 @@ bool MQTTClient::publishTelemetry(const String& payload) {
     }
 
     Serial.println("[MQTT] Telemetry queued for publishing");
+
     Serial.print("[MQTT] Topic: ");
     Serial.println(m_telemetryTopic);
 

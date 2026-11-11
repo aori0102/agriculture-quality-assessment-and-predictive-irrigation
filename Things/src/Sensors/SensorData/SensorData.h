@@ -12,7 +12,7 @@ struct SoilSensorData {
     bool isValid = false;
 };
 
-struct DHT22Data {
+struct DHT11Data {
     float temperature = 0.0f;
     float humidity = 0.0f;
     bool isValid = false;
@@ -20,6 +20,6 @@ struct DHT22Data {
 
 struct SensorData {
     SoilSensorData soil;
-    DHT22Data dht;
+    DHT11Data dht;
     SensorReading light;
 };

@@ -6,12 +6,12 @@
 
 #include "Sensors\SensorData\SensorData.h"
 #include "Moisture\SoilMoistureSensor.h"
-#include "DHT22\DHT22Sensor.h"
+#include "DHT22\DHT11Sensor.h"
 
 class SensorManager {
 private:
     SoilMoistureSensor m_soilSensor;
-    DHT22Sensor m_dhtSensor;
+    DHT11Sensor m_dhtSensor;
 
 public:
     SensorManager(

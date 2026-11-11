@@ -1,7 +1,11 @@
 #pragma once
 
 namespace Config {
-    // Deployment information
+    // WiFi
+    constexpr char WIFI_SSID[] = "UET-Wifi-T4 2.4Ghz";
+    constexpr char WIFI_PASSWORD[] = "";
+
+    // Device configuration
     constexpr char SITE_ID[] = "site01";
     constexpr char ZONE_ID[] = "zone01";
 
@@ -12,7 +16,6 @@ namespace Config {
     constexpr char MQTT_USERNAME[] = "";
     constexpr char MQTT_PASSWORD[] = "";
 
-    // Telemetry
+    // Sampling interval
     constexpr uint32_t TELEMETRY_INTERVAL_MS = 5000;
-    constexpr int CALIBRATION_VERSION = 1;
 }
