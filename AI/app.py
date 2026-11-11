@@ -106,6 +106,7 @@ def main():
     client.on_connect = on_connect
     client.on_subscribe = on_subscribe
     client.on_message = on_message
+    irrigation_handler.configure_command_publisher(client, cfg)
 
     print(f"Connecting to {host}:{port}...")
     client.connect(host, port, keepalive=60)

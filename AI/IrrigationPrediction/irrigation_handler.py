@@ -1,5 +1,6 @@
 import joblib
 import pandas as pd
+import paho.mqtt.client as mqtt
 import json
 from . import field_constants as fc
 from .telemetry_handler import telemetry_handler
@@ -21,6 +22,7 @@ class IrrigationHandler:
         self.current_sample_slot = None
         self.has_handled_this_timestamp = False
         self.last_handling = monotonic()
+        self.mqtt_client: mqtt.Client | None = None
                 
         self.acquired_nodes_path = Path(__file__).with_name(cfg.get("nodes", "acquired_nodes_path"))
 
@@ -195,6 +197,7 @@ class IrrigationHandler:
         pwp = self.plant_profile[fc.PERMANENT_WILTING_POINT]
         if current_soil_moisture <= pwp or predicted_soil_moisture <= pwp:
             print(f"Predicted soil moisture {predicted_soil_moisture:.2f}% or current soil moisture {current_soil_moisture:.2f}% is below permanent wilting point. Irrigation needed.")
+            self.send_irrigation_command(node_id, self.default_irrigation_minutes)
             telemetry_handler.record_irrigation_data(self.default_irrigation_minutes, node_id=node_id)
             return True
         
@@ -203,11 +206,13 @@ class IrrigationHandler:
         madp = self.plant_profile[fc.MANAGEMENT_ALLOWED_DEPLETION_POINT]
         if current_soil_moisture < madp:
             print(f"Current soil moisture {current_soil_moisture:.2f}% is below management allowed depletion point. Irrigation needed.")
+            self.send_irrigation_command(node_id, self.default_irrigation_minutes)
             telemetry_handler.record_irrigation_data(self.default_irrigation_minutes, node_id=node_id)
             return True
         
         if predicted_soil_moisture < madp:
             print(f"Predicted soil moisture {predicted_soil_moisture:.2f}% is below management allowed depletion point. Irrigation needed.")
+            self.send_irrigation_command(node_id, self.reduced_irrigation_minutes)
             telemetry_handler.record_irrigation_data(self.reduced_irrigation_minutes, node_id=node_id)
             return True
         
@@ -215,5 +220,50 @@ class IrrigationHandler:
         print(f"Predicted soil moisture {predicted_soil_moisture:.2f}% is optimal. No irrigation needed.")
         telemetry_handler.record_irrigation_data(0, node_id=node_id)
         return True
+    
+    
+    def configure_command_publisher(self, client: mqtt.Client, config: ConfigParser) -> None:
+        self.edge_id = config['edge']['edge_id'].strip()
+        self.command_topic = config['mqtt']['command_topic']
+        self.command_qos = config.getint('mqtt', 'command_qos')
+        self.command_retain = config.getboolean('mqtt', 'command_retain')
+        self.max_duration_ms = config.getint('pump', 'max_duration_ms')
+        self.mqtt_client = client
+
+
+    def send_irrigation_command(self, node_id: str, irrigation_minutes: int) -> bool:
+        """Queue a start-pump command on the app MQTT client."""
+        if not isinstance(node_id, str) or not node_id.strip() or any(char in node_id for char in "/+#\x00"):
+            raise ValueError("node_id must be a non-empty MQTT topic segment")
+        if type(irrigation_minutes) is not int:
+            raise ValueError("irrigation_minutes must be an integer")
+        if irrigation_minutes <= 0:
+            return False
+        client = self.mqtt_client
+        if client is None:
+            print("Cannot send irrigation command: MQTT publisher is not configured")
+            return False
         
+        duration_ms = irrigation_minutes * 60 * 1000
+        if duration_ms > self.max_duration_ms:
+            raise ValueError(f"duration_ms must not exceed {self.max_duration_ms}")
+        if not client.is_connected():
+            print("Cannot send irrigation command: MQTT is disconnected")
+            return False
+
+        topic = self.command_topic.format(edge_id=self.edge_id, node_id=node_id)
+        payload = {
+            "edge_id": self.edge_id,
+            "node_id": node_id,
+            "action": "start_pump",
+            "issued_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "duration_ms": duration_ms,
+        }
+        result = client.publish(topic, json.dumps(payload), qos=self.command_qos, retain=self.command_retain)
+        if result.rc != mqtt.MQTT_ERR_SUCCESS:
+            print(f"Could not queue irrigation command on {topic}: {mqtt.error_string(result.rc)}")
+            return False
+        return True
+
+
 irrigation_handler = IrrigationHandler()
