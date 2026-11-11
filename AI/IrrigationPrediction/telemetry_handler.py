@@ -78,6 +78,10 @@ class TelemetryHandler:
         sensor_data = sensor_data_frame.loc[sensor_data_frame[fc.NODE_ID] == node_id]
         irrigation_data = irrigation_data_frame.loc[irrigation_data_frame[fc.NODE_ID] == node_id]
         
+        # CSV rows are appended in arrival order, which can differ from sample order.
+        sample_times = pd.to_datetime(sensor_data[fc.TIMESTAMP], format="mixed", utc=True, errors="coerce")
+        sensor_data = sensor_data.loc[sample_times.dropna().sort_values(kind="stable").index]
+
         # Check if there is enough data to calculate the change in soil moisture over 
         # the last 10 minutes along with the delta with the previous reading. If not,
         # return None.
