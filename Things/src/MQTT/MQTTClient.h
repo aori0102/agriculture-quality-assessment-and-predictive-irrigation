@@ -1,3 +1,4 @@
+
 #pragma once
 
 #include <Arduino.h>
@@ -24,8 +25,8 @@ private:
 
 public:
     void begin(
-        const String& edgeId,
-        const String& nodeId,
+        const String& siteId,
+        const String& deviceId,
         const String& brokerHost,
         uint16_t brokerPort,
         const String& username,

@@ -9,21 +9,14 @@
 
 class TelemetryBuilder {
 private:
-    uint32_t m_sequence = 0;
-
-    String m_siteId;
     String m_zoneId;
 
 public:
-    TelemetryBuilder(
-        const String& siteId,
-        const String& zoneId
-    );
+    explicit TelemetryBuilder(const String& zoneId);
 
     TelemetryData build(
         const SensorData& sensorData,
         const DeviceIdentity& identity,
-        bool clockSynced = false,
         const String& sampledAt = ""
     );
 
