@@ -1,5 +1,6 @@
 import json
 import paho.mqtt.client as mqtt
+from concurrent.futures import ThreadPoolExecutor
 from configparser import ConfigParser
 from pathlib import Path
 from time import sleep
@@ -53,6 +54,15 @@ def on_message(client, userdata, message: mqtt.MQTTMessage):
     telemetry_handler.record_sensors_telemetry(message, node_id=node_id)
 
 
+def handle_image(node_id: str, jpeg: bytes) -> None:
+    try:
+        from ComputerVision.image_prediction import process_image
+
+        process_image(node_id, jpeg)
+    except Exception as error:
+        print(f"Could not process image from {node_id}: {error}")
+
+
 def main():
     cfg_path = Path(__file__).with_name(CONFIG_FILE)
     cfg = ConfigParser()
@@ -72,8 +82,22 @@ def main():
     host = cfg["mqtt"]["host"]
     port = cfg.getint("mqtt", "port")
     topic_filter = cfg["mqtt"]["telemetry_filter"].format(edge_id=edge_id)
+    image_filter = cfg["mqtt"]["image_filter"].format(edge_id=edge_id)
     test_topic = topic_filter.replace("+", "test_node", 1)
     test_sent = False
+    image_future = None
+    image_worker = ThreadPoolExecutor(max_workers=1)
+
+    def on_image(client, userdata, message: mqtt.MQTTMessage):
+        nonlocal image_future
+        node_id = strip_topic_to_node_id(message.topic, "image")
+        if not node_id:
+            print(f"Could not extract node ID from {message.topic}")
+            return
+        if image_future is not None and not image_future.done():
+            print(f"Skipping image from {node_id}: image worker is busy")
+            return
+        image_future = image_worker.submit(handle_image, node_id, bytes(message.payload))
 
     def on_connect(client, userdata, flags, reason_code, properties):
         if reason_code.is_failure:
@@ -81,7 +105,7 @@ def main():
             return
 
         print(f"Connected to {host}:{port}")
-        client.subscribe(topic_filter, qos=1)
+        client.subscribe([(topic_filter, 1), (image_filter, 1)])
 
     def on_subscribe(client, userdata, mid, reason_codes, properties):
         nonlocal test_sent
@@ -90,7 +114,7 @@ def main():
             print(f"Subscription rejected: {reason_codes}")
             return
 
-        print(f"Subscribed to {topic_filter}")
+        print(f"Subscribed to {topic_filter} and {image_filter}")
         if not test_sent:
             result = client.publish(
                 test_topic,
@@ -106,11 +130,12 @@ def main():
     client.on_connect = on_connect
     client.on_subscribe = on_subscribe
     client.on_message = on_message
+    client.message_callback_add(image_filter, on_image)
     irrigation_handler.configure_command_publisher(client, cfg)
 
     print(f"Connecting to {host}:{port}...")
-    client.connect(host, port, keepalive=60)
     try:
+        client.connect(host, port, keepalive=60)
         while True:
             result = client.loop(timeout=1.0)
             irrigation_handler.loop()
@@ -123,7 +148,10 @@ def main():
     except KeyboardInterrupt:
         print("Stopping Edge AI.")
     finally:
-        client.disconnect()
+        try:
+            client.disconnect()
+        finally:
+            image_worker.shutdown()
 
 
 if __name__ == "__main__":
