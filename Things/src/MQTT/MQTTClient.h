@@ -12,7 +12,9 @@ private:
     String m_username;
     String m_password;
     String m_clientId;
+
     String m_telemetryTopic;
+    String m_imageTopic;
 
     uint16_t m_port = 1883;
 
@@ -38,4 +40,10 @@ public:
     bool isConnected() const;
 
     bool publishTelemetry(const String& payload);
+
+    bool publishImage(
+        uint32_t sampleSeq,
+        const uint8_t* imageData,
+        size_t imageSize
+    );
 };

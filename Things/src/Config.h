@@ -2,11 +2,11 @@
 
 namespace Config {
     // WiFi
-    constexpr char WIFI_SSID[] = "UET-Wifi-T4 2.4Ghz";
-    constexpr char WIFI_PASSWORD[] = "";
+    constexpr char WIFI_SSID[] = "vivo X90";
+    constexpr char WIFI_PASSWORD[] = "22224444";
 
     // Device configuration
-    constexpr char SITE_ID[] = "site01";
+    constexpr char SITE_ID[] = "c995b729-888e-4a09-a5c3-77d86efa652c";
     constexpr char ZONE_ID[] = "zone01";
 
     // MQTT broker
@@ -17,5 +17,5 @@ namespace Config {
     constexpr char MQTT_PASSWORD[] = "";
 
     // Sampling interval
-    constexpr uint32_t TELEMETRY_INTERVAL_MS = 5000;
+    constexpr uint32_t TELEMETRY_INTERVAL_MS = 20000;
 }

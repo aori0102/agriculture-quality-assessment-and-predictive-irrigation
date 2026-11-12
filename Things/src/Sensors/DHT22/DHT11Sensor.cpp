@@ -8,7 +8,7 @@ DHT11Sensor::DHT11Sensor(int pin)
 
 void DHT11Sensor::begin() {
     m_dht.begin();
-    Serial.println("[DHT22] Initialized");
+    Serial.println("[DHT11] Initialized");
 }
 
 DHT11Data DHT11Sensor::read() {
@@ -18,13 +18,13 @@ DHT11Data DHT11Sensor::read() {
     float humidity = m_dht.readHumidity();
 
     if (isnan(temperature) || isnan(humidity)) {
-        Serial.println("[DHT22] Failed to read sensor!");
+        Serial.println("[DHT11] Failed to read sensor!");
         return result;
     }
 
     if (humidity < 0.0f || humidity > 100.0f) {
         Serial.printf(
-            "[DHT22] Invalid humidity: %.2f\n",
+            "[DHT11] Invalid humidity: %.2f\n",
             humidity
         );
         return result;
