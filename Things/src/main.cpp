@@ -68,6 +68,14 @@ String telemetryTopic;
 String imageTopic;
 
 // =====================================================
+// CAMERA COMMAND
+// =====================================================
+
+// Set to true when an Edge capture command is received.
+// Camera UART request will be handled in loop().
+volatile bool captureCommandPending = false;
+
+// =====================================================
 // SCHEDULER
 // =====================================================
 
@@ -96,6 +104,12 @@ void buildAndPrintTopics() {
     imageTopic =
         "iot/" + siteId + "/" + nodeId + "/image";
 
+    String commandTopic =
+        "iot/" +
+        String(Config::EDGE_ID) + "/" +
+        nodeId +
+        "/command";
+
     Serial.println();
     Serial.println("========== MQTT TOPICS ==========");
 
@@ -104,6 +118,9 @@ void buildAndPrintTopics() {
 
     Serial.print("[MQTT] Image topic: ");
     Serial.println(imageTopic);
+
+    Serial.print("[MQTT] Command topic: ");
+    Serial.println(commandTopic);
 
     Serial.println("=================================");
 }
@@ -141,6 +158,53 @@ String getVietnamTimestamp() {
     strcat(timestamp, "+07:00");
 
     return String(timestamp);
+}
+
+// =====================================================
+// HANDLE CAMERA COMMAND
+// =====================================================
+
+void handleCaptureCommand() {
+
+    if (!captureCommandPending) {
+        return;
+    }
+
+    // Clear pending flag before processing.
+    captureCommandPending = false;
+
+    Serial.println();
+    Serial.println("========== CAMERA COMMAND ==========");
+
+    // Check whether camera is processing another request.
+    if (cameraClient.isBusy()) {
+        Serial.println(
+            "[CAMERA] Capture rejected: camera is busy!"
+        );
+
+        return;
+    }
+
+    // Generate a new sequence for this capture.
+    sampleSequence++;
+
+    Serial.print("[CAMERA] Capture sequence: ");
+    Serial.println(sampleSequence);
+
+    // Send capture request to ESP32-S3.
+    if (!cameraClient.requestCapture(sampleSequence)) {
+        Serial.println(
+            "[CAMERA] Failed to send capture request!"
+        );
+
+        return;
+    }
+
+    Serial.println(
+        "[CAMERA] Capture request sent to ESP32-S3!"
+    );
+
+    Serial.println("====================================");
 }
 
 // =====================================================
@@ -312,35 +376,6 @@ void handleTelemetry() {
             "[TELEMETRY] Publish request failed!"
         );
     }
-
-    // ---------------------------------------------
-    // 8. Request camera capture.
-    // ---------------------------------------------
-
-    Serial.println();
-    Serial.println("========== CAMERA REQUEST ==========");
-
-    Serial.print("[CAMERA] Sample sequence: ");
-    Serial.println(sampleSequence);
-
-    if (cameraClient.isBusy()) {
-        Serial.println(
-            "[CAMERA] Previous capture is still being processed!"
-        );
-
-        return;
-    }
-
-    if (!cameraClient.requestCapture(sampleSequence)) {
-        Serial.println(
-            "[CAMERA] Capture request was not sent!"
-        );
-    }
-    else {
-        Serial.println(
-            "[CAMERA] Capture request sent successfully!"
-        );
-    }
 }
 
 // =====================================================
@@ -500,7 +535,19 @@ void setup() {
     }
 
     // ---------------------------------------------
-    // 7. Initialize MQTT.
+    // 7. Configure capture command callback.
+    // ---------------------------------------------
+
+    mqttClient.setCaptureCommandCallback([]() {
+        Serial.println(
+            "[COMMAND] Capture request received from Edge!"
+        );
+
+        captureCommandPending = true;
+    });
+
+    // ---------------------------------------------
+    // 8. Initialize MQTT.
     // ---------------------------------------------
 
     Serial.println();
@@ -509,17 +556,18 @@ void setup() {
     mqttClient.begin(
         Config::SITE_ID,
         deviceIdentity.getNodeId(),
+        Config::EDGE_ID,
         Config::MQTT_HOST,
         Config::MQTT_PORT,
         Config::MQTT_USERNAME,
         Config::MQTT_PASSWORD
     );
 
-    // Print both MQTT topics.
+    // Print MQTT topics.
     buildAndPrintTopics();
 
     // ---------------------------------------------
-    // 8. Initialize sampling timer.
+    // 9. Initialize sampling timer.
     // ---------------------------------------------
 
     lastTelemetryTime = millis();
@@ -535,25 +583,31 @@ void setup() {
 void loop() {
 
     // ---------------------------------------------
-    // 1. Receive camera data continuously.
-    // ---------------------------------------------
-
-    cameraClient.loop();
-
-    // ---------------------------------------------
-    // 2. Process camera response.
-    // ---------------------------------------------
-
-    handleCameraResponse();
-
-    // ---------------------------------------------
-    // 3. Maintain MQTT connection.
+    // 1. Maintain MQTT connection.
     // ---------------------------------------------
 
     mqttClient.loop();
 
     // ---------------------------------------------
-    // 4. Wait for MQTT connection.
+    // 2. Handle pending Edge capture command.
+    // ---------------------------------------------
+
+    handleCaptureCommand();
+
+    // ---------------------------------------------
+    // 3. Receive camera data continuously.
+    // ---------------------------------------------
+
+    cameraClient.loop();
+
+    // ---------------------------------------------
+    // 4. Process camera response.
+    // ---------------------------------------------
+
+    handleCameraResponse();
+
+    // ---------------------------------------------
+    // 5. Wait for MQTT connection.
     // ---------------------------------------------
 
     if (!mqttClient.isConnected()) {
@@ -563,7 +617,7 @@ void loop() {
     }
 
     // ---------------------------------------------
-    // 5. Read sensors and publish telemetry.
+    // 6. Read sensors and publish telemetry.
     // ---------------------------------------------
 
     handleTelemetry();
