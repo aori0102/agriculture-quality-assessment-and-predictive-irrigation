@@ -37,6 +37,11 @@ class TimeHelper:
     def get_current_slot() -> datetime:
         """Return the start of the current 10-minute slot in UTC."""
         return TimeHelper.floor_to_nearest_ten_minutes(datetime.now(timezone.utc))
+    
+    @staticmethod
+    def get_current_timestamp_floor() -> str:
+        """Return the start of the current 10-minute slot in UTC as an ISO 8601 string."""
+        return TimeHelper.get_current_slot().isoformat(timespec="seconds")
 
     @staticmethod
     def get_current_timestamp() -> str:
@@ -46,7 +51,7 @@ class TimeHelper:
         Returns:
             str: Current timestamp in ISO 8601 format.
         """
-        return TimeHelper.get_current_slot().isoformat(timespec="seconds")
+        return datetime.now(timezone.utc).isoformat(timespec="seconds")
     
     
     @staticmethod

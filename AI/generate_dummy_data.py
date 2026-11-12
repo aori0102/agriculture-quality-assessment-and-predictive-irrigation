@@ -13,6 +13,7 @@ import paho.mqtt.client as mqtt
 from IrrigationPrediction import field_constants as fc
 
 
+SEND_INTERVAL_SECONDS = 10
 TEST_NODE_IDS = ("test_node_1", "test_node_2", "test_node_3", "test_node_4")
 
 
@@ -21,11 +22,13 @@ def log(message: str) -> None:
 
 
 def next_sample_slot(now: datetime) -> datetime:
-    start = now.replace(minute=now.minute // 10 * 10, second=0, microsecond=0)
-    return start + timedelta(minutes=10)
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    elapsed = now - midnight
+    interval = timedelta(seconds=SEND_INTERVAL_SECONDS)
+    return midnight + (elapsed // interval + 1) * interval
 
 
-def send_sample(client, connected: Event, topic: str, loss_rate: float) -> None:
+def send_sample(client, connected: Event, topic_filter: str, node_id: str, loss_rate: float) -> None:
     if not connected.is_set():
         log("SKIPPED: MQTT broker is offline")
         return
@@ -33,10 +36,17 @@ def send_sample(client, connected: Event, topic: str, loss_rate: float) -> None:
         log("SKIPPED: simulated network loss")
         return
 
+    topic = topic_filter.replace("+", node_id)
     payload = json.dumps({
+        fc.TIMESTAMP: datetime.now().astimezone().isoformat(timespec="seconds"),
+        fc.NODE_ID: node_id,
         fc.SOIL_MOISTURE_PERCENTAGE: round(random.uniform(0, 100), 2),
         fc.AIR_TEMP_C: round(random.uniform(5, 20), 2),
         fc.AIR_RELATIVE_HUMIDITY_PERCENTAGE: round(random.uniform(0, 100), 2),
+        fc.QUALITY: {
+            "soil": "valid",
+            "dht": "valid"
+        }
     })
     result = client.publish(topic, payload, qos=1, retain=False)
     if result.rc != mqtt.MQTT_ERR_SUCCESS:
@@ -53,7 +63,9 @@ def send_sample(client, connected: Event, topic: str, loss_rate: float) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Send simulated MQTT telemetry every 10 minutes.")
+    parser = argparse.ArgumentParser(
+        description=f"Send simulated MQTT telemetry every {SEND_INTERVAL_SECONDS} seconds."
+    )
     parser.add_argument("--node-id", help="Use one node for every sample.")
     parser.add_argument("--loss-rate", type=float, default=0.0, help="Chance of dropping a sample (0 to 1).")
     args = parser.parse_args()
@@ -106,9 +118,8 @@ def main() -> None:
             log(f"WAITING: next sample at {slot:%H:%M:%S %z}")
             while (remaining := slot.timestamp() - time()) > 0:
                 sleep(min(remaining, 1))
-            log(f"SAMPLE: {slot:%H:%M %z}")
-            topic = topic_filter.replace("+", next(node_rotation), 1)
-            send_sample(client, connected, topic, args.loss_rate)
+            log(f"SAMPLE: {slot:%H:%M:%S %z}")
+            send_sample(client, connected, topic_filter, next(node_rotation), args.loss_rate)
     except KeyboardInterrupt:
         log("STOPPED")
     finally:
