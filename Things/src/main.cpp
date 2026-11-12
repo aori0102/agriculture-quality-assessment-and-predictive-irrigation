@@ -1,17 +1,42 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
-#include <time.h>
+
+#include <chrono>
+#include <ctime>
+#include <cstring>
+#include <cstdlib>
 
 #include "Config.h"
 
 #include "Identity/DeviceIdentity.h"
 #include "Sensors/SensorManager.h"
+#include "Camera/CameraUARTClient.h"
 
 #include "Telemetry/TelemetryBuilder.h"
 #include "MQTT/MQTTClient.h"
 
-// Sensor configuration
+// =====================================================
+// CAMERA UART CONFIGURATION
+// =====================================================
+
+constexpr uint32_t CAMERA_UART_BAUD_RATE = 921600;
+
+constexpr int CAMERA_UART_RX_PIN = 16;
+constexpr int CAMERA_UART_TX_PIN = 17;
+
+constexpr size_t CAMERA_UART_RX_BUFFER_SIZE = 8192;
+
+HardwareSerial cameraSerial(2);
+
+CameraUARTClient cameraClient;
+
+uint32_t sampleSequence = 0;
+
+// =====================================================
+// SENSOR CONFIGURATION
+// =====================================================
+
 SensorManager sensorManager(
     27,     // Soil moisture pin
     26,     // DHT22 pin
@@ -19,75 +44,467 @@ SensorManager sensorManager(
     1400    // Wet calibration
 );
 
-// Device identity
+// =====================================================
+// DEVICE IDENTITY
+// =====================================================
+
 DeviceIdentity deviceIdentity;
 
-// Telemetry
+// =====================================================
+// TELEMETRY
+// =====================================================
+
 TelemetryBuilder telemetryBuilder(
     Config::ZONE_ID
 );
 
+// =====================================================
 // MQTT
+// =====================================================
+
 MQTTClient mqttClient;
+
+String telemetryTopic;
+String imageTopic;
+
+// =====================================================
+// SCHEDULER
+// =====================================================
 
 uint32_t lastTelemetryTime = 0;
 
-// NTP configuration
+// =====================================================
+// NTP CONFIGURATION
+// =====================================================
+
 const char* NTP_SERVER = "pool.ntp.org";
-const long GMT_OFFSET_SECONDS = 7 * 3600;
-const int DAYLIGHT_OFFSET_SECONDS = 0;
+const char* SECONDARY_NTP_SERVER = "time.nist.gov";
+
+constexpr std::time_t MIN_VALID_TIMESTAMP = 1700000000;
+
+// =====================================================
+// BUILD MQTT TOPICS
+// =====================================================
+
+void buildAndPrintTopics() {
+    const String siteId = Config::SITE_ID;
+    const String nodeId = deviceIdentity.getNodeId();
+
+    telemetryTopic =
+        "iot/" + siteId + "/" + nodeId + "/telemetry";
+
+    imageTopic =
+        "iot/" + siteId + "/" + nodeId + "/image";
+
+    Serial.println();
+    Serial.println("========== MQTT TOPICS ==========");
+
+    Serial.print("[MQTT] Telemetry topic: ");
+    Serial.println(telemetryTopic);
+
+    Serial.print("[MQTT] Image topic: ");
+    Serial.println(imageTopic);
+
+    Serial.println("=================================");
+}
+
+// =====================================================
+// TIMESTAMP
+// =====================================================
+
+String getVietnamTimestamp() {
+    auto now = std::chrono::system_clock::now();
+
+    std::time_t currentTime =
+        std::chrono::system_clock::to_time_t(now);
+
+    if (currentTime < MIN_VALID_TIMESTAMP) {
+        return "";
+    }
+
+    // Convert UTC to Vietnam time (UTC+7).
+    std::time_t vietnamTime = currentTime + 7 * 3600;
+
+    struct tm localTime;
+
+    gmtime_r(&vietnamTime, &localTime);
+
+    char timestamp[32];
+
+    strftime(
+        timestamp,
+        sizeof(timestamp),
+        "%Y-%m-%dT%H:%M:%S",
+        &localTime
+    );
+
+    strcat(timestamp, "+07:00");
+
+    return String(timestamp);
+}
+
+// =====================================================
+// CAMERA RESPONSE HANDLING
+// =====================================================
+
+void handleCameraResponse() {
+
+    // ---------------------------------------------
+    // 1. Handle successfully received image.
+    // ---------------------------------------------
+
+    if (cameraClient.hasImage()) {
+
+        // Keep the image in CameraUARTClient until
+        // MQTT is connected.
+        if (!mqttClient.isConnected()) {
+            return;
+        }
+
+        CameraImage image;
+
+        if (cameraClient.takeImage(image)) {
+
+            Serial.println();
+            Serial.println("========== CAMERA IMAGE RECEIVED ==========");
+
+            Serial.print("[CAMERA] Sample sequence: ");
+            Serial.println(image.sampleSeq);
+
+            Serial.print("[CAMERA] Image size: ");
+            Serial.print(image.imageSize);
+            Serial.println(" bytes");
+
+            Serial.print("[MQTT] Image topic: ");
+            Serial.println(imageTopic);
+
+            // -----------------------------------------
+            // Publish JPEG image to MQTT.
+            // -----------------------------------------
+
+            bool published = mqttClient.publishImage(
+                image.sampleSeq,
+                image.data,
+                image.imageSize
+            );
+
+            if (published) {
+                Serial.println(
+                    "[CAMERA] Image submitted to MQTT successfully!"
+                );
+            }
+            else {
+                Serial.println(
+                    "[CAMERA] Image MQTT publish failed!"
+                );
+            }
+
+            // -----------------------------------------
+            // Release image memory.
+            // -----------------------------------------
+
+            free(image.data);
+
+            image.data = nullptr;
+
+            Serial.println("[CAMERA] Image memory released!");
+
+            Serial.println("===========================================");
+        }
+    }
+
+    // ---------------------------------------------
+    // 2. Handle camera error.
+    // ---------------------------------------------
+
+    if (cameraClient.hasError()) {
+
+        Serial.println();
+        Serial.println("[CAMERA] Capture failed!");
+
+        // Reset parser so that the next request
+        // can be processed.
+        cameraClient.reset();
+    }
+}
+
+// =====================================================
+// TELEMETRY HANDLING
+// =====================================================
+
+void handleTelemetry() {
+
+    uint32_t currentTime = millis();
+
+    if (
+        currentTime - lastTelemetryTime <
+        Config::TELEMETRY_INTERVAL_MS
+    ) {
+        return;
+    }
+
+    lastTelemetryTime = currentTime;
+
+    // ---------------------------------------------
+    // 1. Read sensors.
+    // ---------------------------------------------
+
+    SensorData sensorData = sensorManager.readAll();
+
+    // ---------------------------------------------
+    // 2. Generate sample sequence.
+    // ---------------------------------------------
+
+    sampleSequence++;
+
+    // ---------------------------------------------
+    // 3. Get timestamp.
+    // ---------------------------------------------
+
+    String sampledAt = getVietnamTimestamp();
+
+    // ---------------------------------------------
+    // 4. Build telemetry.
+    // ---------------------------------------------
+
+    TelemetryData telemetry = telemetryBuilder.build(
+        sensorData,
+        deviceIdentity,
+        sampledAt
+    );
+
+    // ---------------------------------------------
+    // 5. Convert telemetry to JSON.
+    // ---------------------------------------------
+
+    String payload = telemetryBuilder.toJson(telemetry);
+
+    // ---------------------------------------------
+    // 6. Print telemetry.
+    // ---------------------------------------------
+
+    Serial.println();
+    Serial.println("========== TELEMETRY ==========");
+
+    Serial.print("[TELEMETRY] Sample sequence: ");
+    Serial.println(sampleSequence);
+
+    Serial.print("[MQTT] Telemetry topic: ");
+    Serial.println(telemetryTopic);
+
+    Serial.println("[MQTT] Payload:");
+    Serial.println(payload);
+
+    // ---------------------------------------------
+    // 7. Publish telemetry.
+    // ---------------------------------------------
+
+    bool telemetryPublished =
+        mqttClient.publishTelemetry(payload);
+
+    if (telemetryPublished) {
+        Serial.println(
+            "[TELEMETRY] Publish request accepted!"
+        );
+    }
+    else {
+        Serial.println(
+            "[TELEMETRY] Publish request failed!"
+        );
+    }
+
+    // ---------------------------------------------
+    // 8. Request camera capture.
+    // ---------------------------------------------
+
+    Serial.println();
+    Serial.println("========== CAMERA REQUEST ==========");
+
+    Serial.print("[CAMERA] Sample sequence: ");
+    Serial.println(sampleSequence);
+
+    if (cameraClient.isBusy()) {
+        Serial.println(
+            "[CAMERA] Previous capture is still being processed!"
+        );
+
+        return;
+    }
+
+    if (!cameraClient.requestCapture(sampleSequence)) {
+        Serial.println(
+            "[CAMERA] Capture request was not sent!"
+        );
+    }
+    else {
+        Serial.println(
+            "[CAMERA] Capture request sent successfully!"
+        );
+    }
+}
+
+// =====================================================
+// SETUP
+// =====================================================
 
 void setup() {
+
     Serial.begin(115200);
+
     delay(1000);
 
-    // 1. Initialize WiFi
+    Serial.println();
+    Serial.println("======================================");
+    Serial.println("       ESP32 MAIN CONTROLLER");
+    Serial.println("======================================");
+
+    // ---------------------------------------------
+    // 1. Initialize camera UART.
+    // ---------------------------------------------
+
+    Serial.println();
+    Serial.println("========== CAMERA UART INITIALIZATION ==========");
+
+    // Increase RX buffer BEFORE HardwareSerial.begin().
+    cameraSerial.setRxBufferSize(
+        CAMERA_UART_RX_BUFFER_SIZE
+    );
+
+    cameraClient.begin(
+        cameraSerial,
+        CAMERA_UART_BAUD_RATE,
+        CAMERA_UART_RX_PIN,
+        CAMERA_UART_TX_PIN
+    );
+
+    Serial.println("[UART] Camera UART initialized!");
+
+    Serial.printf(
+        "[UART] RX: GPIO%d\n",
+        CAMERA_UART_RX_PIN
+    );
+
+    Serial.printf(
+        "[UART] TX: GPIO%d\n",
+        CAMERA_UART_TX_PIN
+    );
+
+    Serial.printf(
+        "[UART] Baud rate: %lu\n",
+        static_cast<unsigned long>(CAMERA_UART_BAUD_RATE)
+    );
+
+    Serial.printf(
+        "[UART] RX buffer requested: %u bytes\n",
+        static_cast<unsigned int>(CAMERA_UART_RX_BUFFER_SIZE)
+    );
+
+    // ---------------------------------------------
+    // 2. Initialize WiFi.
+    // ---------------------------------------------
+
     WiFi.mode(WIFI_AP_STA);
 
-    // 2. Initialize device identity
+    // ---------------------------------------------
+    // 3. Initialize device identity.
+    // ---------------------------------------------
+
+    Serial.println();
+    Serial.println("========== DEVICE IDENTITY ==========");
+
     deviceIdentity.begin();
 
-    Serial.println("\n========== DEVICE IDENTITY ==========");
     Serial.print("[DEVICE] Node ID: ");
     Serial.println(deviceIdentity.getNodeId());
 
-    // 3. Initialize sensors
-    Serial.println("\n========== SENSOR INITIALIZATION ==========");
+    // ---------------------------------------------
+    // 4. Initialize sensors.
+    // ---------------------------------------------
+
+    Serial.println();
+    Serial.println("========== SENSOR INITIALIZATION ==========");
+
     sensorManager.begin();
 
-    // 4. Connect WiFi (temporary test)
-    WiFi.begin(Config::WIFI_SSID, Config::WIFI_PASSWORD);
+    // ---------------------------------------------
+    // 5. Connect WiFi.
+    // ---------------------------------------------
+
+    Serial.println();
+    Serial.println("========== WIFI CONNECTION ==========");
+
+    WiFi.begin(
+        Config::WIFI_SSID,
+        Config::WIFI_PASSWORD
+    );
 
     Serial.print("[WIFI] Connecting");
 
     while (WiFi.status() != WL_CONNECTED) {
         delay(500);
+
         Serial.print(".");
     }
 
-    Serial.println("\n[WIFI] Connected!");
+    Serial.println();
+    Serial.println("[WIFI] Connected!");
+
     Serial.print("[WIFI] IP: ");
     Serial.println(WiFi.localIP());
 
-    // 5. Synchronize time using NTP
-    Serial.println("\n========== NTP SYNCHRONIZATION ==========");
+    // ---------------------------------------------
+    // 6. Synchronize time using NTP.
+    // ---------------------------------------------
+
+    Serial.println();
+    Serial.println("========== NTP SYNCHRONIZATION ==========");
 
     configTime(
-        GMT_OFFSET_SECONDS,
-        DAYLIGHT_OFFSET_SECONDS,
-        NTP_SERVER
+        0,
+        0,
+        NTP_SERVER,
+        SECONDARY_NTP_SERVER
     );
 
-    struct tm timeInfo;
+    String sampledAt = "";
 
-    if (getLocalTime(&timeInfo, 10000)) {
-        Serial.println("[NTP] Time synchronized");
-    } else {
-        Serial.println("[NTP] Synchronization failed");
+    uint32_t ntpStartTime = millis();
+
+    while (
+        sampledAt.isEmpty() &&
+        millis() - ntpStartTime < 15000
+    ) {
+        sampledAt = getVietnamTimestamp();
+
+        if (sampledAt.isEmpty()) {
+            delay(500);
+
+            Serial.print(".");
+        }
     }
 
-    // 6. Initialize MQTT
-    Serial.println("\n========== MQTT INITIALIZATION ==========");
+    if (!sampledAt.isEmpty()) {
+        Serial.println();
+        Serial.println("[NTP] Time synchronized!");
+
+        Serial.print("[NTP] Vietnam time: ");
+        Serial.println(sampledAt);
+    }
+    else {
+        Serial.println();
+        Serial.println("[NTP] Synchronization failed!");
+
+        Serial.println(
+            "[NTP] Timestamp unavailable until synchronized."
+        );
+    }
+
+    // ---------------------------------------------
+    // 7. Initialize MQTT.
+    // ---------------------------------------------
+
+    Serial.println();
+    Serial.println("========== MQTT INITIALIZATION ==========");
 
     mqttClient.begin(
         Config::SITE_ID,
@@ -97,65 +514,57 @@ void setup() {
         Config::MQTT_USERNAME,
         Config::MQTT_PASSWORD
     );
+
+    // Print both MQTT topics.
+    buildAndPrintTopics();
+
+    // ---------------------------------------------
+    // 8. Initialize sampling timer.
+    // ---------------------------------------------
+
+    lastTelemetryTime = millis();
+
+    Serial.println();
+    Serial.println("========== SYSTEM READY ==========");
 }
 
+// =====================================================
+// LOOP
+// =====================================================
+
 void loop() {
-    // 1. Maintain MQTT connection
+
+    // ---------------------------------------------
+    // 1. Receive camera data continuously.
+    // ---------------------------------------------
+
+    cameraClient.loop();
+
+    // ---------------------------------------------
+    // 2. Process camera response.
+    // ---------------------------------------------
+
+    handleCameraResponse();
+
+    // ---------------------------------------------
+    // 3. Maintain MQTT connection.
+    // ---------------------------------------------
+
     mqttClient.loop();
 
-    // 2. Wait for MQTT connection
+    // ---------------------------------------------
+    // 4. Wait for MQTT connection.
+    // ---------------------------------------------
+
     if (!mqttClient.isConnected()) {
+        delay(1);
+
         return;
     }
 
-    uint32_t currentTime = millis();
+    // ---------------------------------------------
+    // 5. Read sensors and publish telemetry.
+    // ---------------------------------------------
 
-    // 3. Read and publish telemetry periodically
-    if (currentTime - lastTelemetryTime >=
-        Config::TELEMETRY_INTERVAL_MS) {
-
-        lastTelemetryTime = currentTime;
-
-        // Read sensors
-        SensorData sensorData = sensorManager.readAll();
-
-        // Get current UTC timestamp
-        String sampledAt = "";
-
-        struct tm timeInfo;
-
-        if (getLocalTime(&timeInfo, 100)) {
-            char timestamp[25];
-
-            strftime(
-                timestamp,
-                sizeof(timestamp),
-                "%Y-%m-%dT%H:%M:%SZ",
-                &timeInfo
-            );
-
-            sampledAt = timestamp;
-        }
-
-        // Build telemetry
-        TelemetryData telemetry = telemetryBuilder.build(
-            sensorData,
-            deviceIdentity,
-            sampledAt
-        );
-
-        // Convert telemetry to JSON
-        String payload = telemetryBuilder.toJson(telemetry);
-
-        // Publish telemetry
-        Serial.println("\n========== TELEMETRY ==========");
-        Serial.print("[MQTT] Topic: ");
-        Serial.println("iot/" + String(Config::SITE_ID) + "/" +
-                       deviceIdentity.getNodeId() + "/telemetry");
-
-        Serial.println("[MQTT] Payload:");
-        Serial.println(payload);
-
-        mqttClient.publishTelemetry(payload);
-    }
+    handleTelemetry();
 }
