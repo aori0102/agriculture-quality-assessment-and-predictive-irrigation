@@ -10,3 +10,4 @@ class BlynkPins:
 
 class BlynkTopics:
     PUMP_COMMAND = "downlink/ds/Pump Command"
+    REDIRECT = "downlink/redirect"
