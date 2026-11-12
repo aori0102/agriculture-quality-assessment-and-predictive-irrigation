@@ -1,0 +1,2 @@
+AI/ComputerVision/runs/detect/lettuce-pallets-x/weights/*.pt filter=lfs diff=lfs merge=lfs -text
+AI/ComputerVision/runs/classify/lettuce-npk-x/weights/*.pt filter=lfs diff=lfs merge=lfs -text
