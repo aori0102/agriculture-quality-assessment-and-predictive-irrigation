@@ -221,3 +221,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# YOLOv8 Models
+yolov8x.pt
+yolov8x-cls.pt
