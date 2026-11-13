@@ -6,6 +6,7 @@ AIR_RELATIVE_HUMIDITY_PERCENTAGE = "air_humidity_pct"
 IRRIGATION_10M = "irrigation_10m"
 NODE_ID = "node_id"
 SAMPLED_AT = "sampled_at"
+QUALITY = "quality"
 
 SATURATION_POINT = "saturation_point"
 FIELD_CAPACITY = "field_capacity"

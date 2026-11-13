@@ -2,15 +2,15 @@ import json
 import paho.mqtt.client as mqtt
 import csv
 import pandas as pd
+from acquired_node_handler import AcquiredNodeHandler
 from . import field_constants as fc
-from .time_helper import TimeHelper
+from time_helper import TimeHelper
 from time import time
 from pathlib import Path
 from configparser import ConfigParser
 from datetime import timezone
 
-TELEMETRY_FIELDS = (fc.SAMPLED_AT, "soil_index_pct", "temperature_c", "air_humidity_pct")
-LEGACY_TELEMETRY_FIELDS = (fc.TIMESTAMP, fc.SOIL_MOISTURE_PERCENTAGE, fc.AIR_TEMP_C, fc.AIR_RELATIVE_HUMIDITY_PERCENTAGE)
+RAW_TELEMTRY_FIELDS = (fc.SAMPLED_AT, fc.SOIL_MOISTURE_PERCENTAGE, fc.AIR_TEMP_C, fc.AIR_RELATIVE_HUMIDITY_PERCENTAGE, fc.QUALITY)
 SENSORS_FIELDS = [fc.TIMESTAMP, fc.NODE_ID, fc.SOIL_MOISTURE_PERCENTAGE, fc.AIR_TEMP_C, fc.AIR_RELATIVE_HUMIDITY_PERCENTAGE]
 IRRIGATION_FIELDS = [fc.TIMESTAMP, fc.NODE_ID, fc.IRRIGATION_10M]
 
@@ -128,18 +128,16 @@ class TelemetryHandler:
             print(f"Expected a JSON object on {message.topic}")
             return False
 
-        fields = LEGACY_TELEMETRY_FIELDS
-        if fc.SAMPLED_AT in data:
-            fields = TELEMETRY_FIELDS
-            if data.get(fc.NODE_ID) != node_id:
-                print(f"Payload node_id does not match topic {message.topic}")
-                return False
-
-        if not all(field in data for field in fields):
-            print(f"Missing fields in {message.topic}: {data}")
+        fields = RAW_TELEMTRY_FIELDS
+        if data.get(fc.NODE_ID) != node_id:
+            print(f"Payload node_id does not match topic {message.topic}")
             return False
 
-        raw_timestamp, soil_moisture_pct, air_temp_c, humidity_pct = (data[field] for field in fields)
+        if not all(field in data for field in fields):
+            print(f"Missing fields in {message.topic}: {data} ({[missing for missing in fields if missing not in data]})")
+            return False
+
+        raw_timestamp, soil_moisture_pct, air_temp_c, humidity_pct, quality = (data[field] for field in fields)
         if any(type(value) not in (int, float) for value in (soil_moisture_pct, air_temp_c, humidity_pct)):
             print(f"Expected numeric sensor values on {message.topic}")
             return False
@@ -157,6 +155,14 @@ class TelemetryHandler:
             return False
         timestamp = TimeHelper.floor_to_nearest_ten_minutes(timestamp.astimezone(timezone.utc))
         
+        if "soil" not in quality or quality["soil"] == "invalid":
+            print(f"Invalid or missing soil moisture sensor reading quality.")
+            return False
+        
+        if "dht" not in quality or quality["dht"] == "invalid":
+            print(f"Invalid or missing DHT sensor reading quality.")
+            return False
+
         if not 0 <= soil_moisture_pct <= 100:
             print(f"Invalid soil moisture percentage on {message.topic}: {soil_moisture_pct}")
             return False
@@ -179,8 +185,7 @@ class TelemetryHandler:
                 fc.AIR_RELATIVE_HUMIDITY_PERCENTAGE: humidity_pct
             })
             
-        from .irrigation_handler import irrigation_handler
-        irrigation_handler.record_acquired_node(node_id)
+        AcquiredNodeHandler.record_acquired_node(node_id)  # Record the node ID as acquired
         return True
     
 
@@ -199,7 +204,7 @@ class TelemetryHandler:
             if needs_header:
                 writer.writeheader()
             writer.writerow({
-                fc.TIMESTAMP: TimeHelper.get_current_timestamp(),
+                fc.TIMESTAMP: TimeHelper.get_current_timestamp_floor(),
                 fc.NODE_ID: node_id,
                 fc.IRRIGATION_10M: irrigation_value
             })

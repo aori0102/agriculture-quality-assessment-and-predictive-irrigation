@@ -5,8 +5,10 @@ from configparser import ConfigParser
 from pathlib import Path
 from time import sleep
 from uuid import uuid4
+from ComputerVision.capture_handler import capture_handler
 from IrrigationPrediction.telemetry_handler import telemetry_handler
 from IrrigationPrediction.irrigation_handler import irrigation_handler
+from command_proxy import command_proxy
 
 CONFIG_FILE = "config.cfg"
 
@@ -132,6 +134,7 @@ def main():
     client.on_message = on_message
     client.message_callback_add(image_filter, on_image)
     irrigation_handler.configure_command_publisher(client, cfg)
+    command_proxy.configure(client, cfg)
 
     print(f"Connecting to {host}:{port}...")
     try:
@@ -139,6 +142,7 @@ def main():
         while True:
             result = client.loop(timeout=1.0)
             irrigation_handler.loop()
+            capture_handler.loop()
             if result != mqtt.MQTT_ERR_SUCCESS:
                 sleep(1)
                 try:

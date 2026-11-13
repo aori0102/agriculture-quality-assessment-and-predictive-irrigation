@@ -4,11 +4,14 @@ import paho.mqtt.client as mqtt
 import json
 from . import field_constants as fc
 from .telemetry_handler import telemetry_handler
-from .time_helper import TimeHelper
+from time_helper import TimeHelper
 from pathlib import Path
 from configparser import ConfigParser
 from datetime import datetime, timezone
 from time import monotonic
+from acquired_node_handler import AcquiredNodeHandler
+from action_index import ActionIndex
+from command_proxy import command_proxy
 
 class IrrigationHandler:
     def __init__(self):
@@ -22,10 +25,7 @@ class IrrigationHandler:
         self.current_sample_slot = None
         self.has_handled_this_timestamp = False
         self.last_handling = monotonic()
-        self.mqtt_client: mqtt.Client | None = None
                 
-        self.acquired_nodes_path = Path(__file__).with_name(cfg.get("nodes", "acquired_nodes_path"))
-
         self.default_irrigation_minutes = cfg.getint("irrigation", "default_irrigation_minutes")
         self.reduced_irrigation_minutes = cfg.getint("irrigation", "reduced_irrigation_minutes")
         self.sample_delay_seconds = cfg.getint("sampling", "sample_delay_seconds")
@@ -37,24 +37,6 @@ class IrrigationHandler:
         plant_path = Path(__file__).with_name(cfg.get("plant", "plant_profile_path"))
         with plant_path.open("r", encoding="utf-8") as file:
             self.plant_profile = json.load(file)
-    
-    
-    def record_acquired_node(self, node_id: str) -> None:
-        """
-        Record a new acquired node ID to the acquired nodes list. This is used to
-        keep track of which nodes will be sampled for irrigation prediction. If the 
-        node ID is already in the list, it will not be added again.
-        """
-        try:
-            with self.acquired_nodes_path.open("r", encoding="utf-8") as file:
-                acquired_nodes = json.load(file)
-        except (FileNotFoundError, json.JSONDecodeError):
-            acquired_nodes = []
-            
-        if node_id not in acquired_nodes:
-            acquired_nodes.append(node_id)
-            with self.acquired_nodes_path.open("w", encoding="utf-8") as file:
-                json.dump(acquired_nodes, file, indent=4)
 
 
     def predict_soil_moisture(
@@ -128,12 +110,7 @@ class IrrigationHandler:
         
         # Rebuild the sampling list if not already
         if not self.has_handled_this_timestamp:
-            self.current_unsampled_nodes = set([])
-            try:
-                with self.acquired_nodes_path.open("r", encoding="utf-8") as file:
-                    self.current_unsampled_nodes = set(json.load(file))
-            except (FileNotFoundError, json.JSONDecodeError):
-                return
+            self.current_unsampled_nodes = AcquiredNodeHandler.read_all_nodes()
             self.has_handled_this_timestamp = True
 
         # Sample all nodes
@@ -231,39 +208,30 @@ class IrrigationHandler:
         self.mqtt_client = client
 
 
-    def send_irrigation_command(self, node_id: str, irrigation_minutes: int) -> bool:
-        """Queue a start-pump command on the app MQTT client."""
-        if not isinstance(node_id, str) or not node_id.strip() or any(char in node_id for char in "/+#\x00"):
-            raise ValueError("node_id must be a non-empty MQTT topic segment")
-        if type(irrigation_minutes) is not int:
-            raise ValueError("irrigation_minutes must be an integer")
+    def send_irrigation_command(self, node_id: str, irrigation_minutes: int) -> None:
+        """
+        Send an irrigation command to the specified node via MQTT. The command will instruct
+        the node to start the pump for the specified duration in minutes.
+
+        Args:
+            node_id (str): The ID of the node to which the command will be sent.
+            irrigation_minutes (int): The duration for which the pump should run, in minutes.
+        """
         if irrigation_minutes <= 0:
-            return False
-        client = self.mqtt_client
-        if client is None:
-            print("Cannot send irrigation command: MQTT publisher is not configured")
-            return False
-        
+            print(f"Invalid irrigation duration: {irrigation_minutes} minutes. Command not sent.")
+            return
+
         duration_ms = irrigation_minutes * 60 * 1000
         if duration_ms > self.max_duration_ms:
-            raise ValueError(f"duration_ms must not exceed {self.max_duration_ms}")
-        if not client.is_connected():
-            print("Cannot send irrigation command: MQTT is disconnected")
-            return False
+            print(f"Requested irrigation duration {duration_ms} ms exceeds maximum allowed {self.max_duration_ms} ms. Command not sent.")
+            return
 
-        topic = self.command_topic.format(edge_id=self.edge_id, node_id=node_id)
-        payload = {
-            "edge_id": self.edge_id,
-            "node_id": node_id,
-            "action": "start_pump",
-            "issued_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "duration_ms": duration_ms,
-        }
-        result = client.publish(topic, json.dumps(payload), qos=self.command_qos, retain=self.command_retain)
-        if result.rc != mqtt.MQTT_ERR_SUCCESS:
-            print(f"Could not queue irrigation command on {topic}: {mqtt.error_string(result.rc)}")
-            return False
-        return True
+        command_proxy.send_command(
+            node_id=node_id,
+            action=ActionIndex.StartPump,
+            ttl_ms=60_000,
+            duration_ms=duration_ms
+        )
 
 
 irrigation_handler = IrrigationHandler()
