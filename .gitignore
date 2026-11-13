@@ -225,3 +225,6 @@ __marimo__/
 # YOLOv8 Models
 yolov8x.pt
 yolov8x-cls.pt
+
+# Runtime files and folders
+/AI/ComputerVision/output/
