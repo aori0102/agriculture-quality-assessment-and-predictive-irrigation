@@ -1,129 +1,178 @@
-"""Train a 10-minute soil moisture forecast from sensor CSV files.
-
-Sensor CSV (one or more): timestamp, sector, soil_moisture_pct, air_temp_c,
-air_rh_pct, irrigation_ml. Irrigation is the volume in the 10-minute interval
-ending at timestamp. Use zero for a confirmed interval without irrigation.
-Mendeley dataset_zone_N_preprocessed.csv files are also supported. These use
-irrigation duration in minutes. Use one irrigation unit per training run.
-
-Naive sensor timestamps use --sensor-timezone (default UTC).
-"""
+"""Train a 10-minute soil moisture forecast from prepared train/test CSVs."""
 
 import argparse
 from pathlib import Path
-import re
-
+import matplotlib.pyplot as plt
 import joblib
 import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.impute import SimpleImputer
 from sklearn.metrics import mean_absolute_error
+from sklearn.pipeline import Pipeline
 
-FEATURES = [
-    "soil_moisture_pct",
-    "soil_change_10m",
-    "air_temp_c",
-    "air_rh_pct",
-    "irrigation_10m",
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+DATA_DIR = SCRIPT_DIR / "datasets"
+
+BASE_FEATURES = [
+    "soil_moisture",
+    "weather_temp",
+    "weather_humidity",
+    "irrigation_past_10m",
+    "irrigation_next_10m",
 ]
-HORIZON = pd.Timedelta(minutes=10)
+DELTA_FEATURE = "soil_delta_10m"
+TARGET = "y"
 
 
-def prepare_sensors(paths, sensor_timezone="UTC"):
-    frames = []
-    irrigation_columns = set()
-    for path in paths:
-        frame = pd.read_csv(path)
-        irrigation_column = "irrigation_ml"
-        zone = re.fullmatch(r"dataset_zone_(\d+)_preprocessed", Path(path).stem)
-        if zone and "ts" in frame:
-            frame = frame.rename(columns={
-                "ts": "timestamp",
-                "soil_moisture": "soil_moisture_pct",
-                "weather_temp": "air_temp_c",
-                "weather_humidity": "air_rh_pct",
-            })
-            frame["sector"] = int(zone.group(1))
-            irrigation_column = "irrigation_duration_minutes"
+def save_prediction_scatter(test, predictions, output_path):
+    actual = test[TARGET].to_numpy()
+    irrigated = test["irrigation_next_10m"].gt(0).to_numpy()
 
-        columns = [
-            "timestamp", "sector", "soil_moisture_pct", "air_temp_c", "air_rh_pct",
-            irrigation_column,
-        ]
-        missing = set(columns) - set(frame.columns)
-        if missing:
-            raise ValueError(f"{path}: missing columns {', '.join(sorted(missing))}")
-        frame = frame[columns].copy()
-        if sensor_timezone == "UTC":
-            frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True)
-        else:
-            timestamps = pd.to_datetime(frame["timestamp"])
-            if timestamps.dt.tz is None:
-                timestamps = timestamps.dt.tz_localize(sensor_timezone)
-            frame["timestamp"] = timestamps.dt.tz_convert("UTC")
-        irrigation_columns.add(irrigation_column)
-        frames.append(frame)
+    fig, ax = plt.subplots(figsize=(7, 7), layout="constrained")
 
-    if len(irrigation_columns) != 1:
-        raise ValueError("Use either irrigation duration or volume in a training run.")
-    irrigation_column = irrigation_columns.pop()
-    sensors = pd.concat(frames, ignore_index=True)
-    frames = []
-    for _, sector in sensors.groupby("sector"):
-        sector = sector.set_index("timestamp").sort_index().asfreq("10min")
-        moisture = sector["soil_moisture_pct"]
-        irrigation = sector[irrigation_column]
-        if irrigation_column == "irrigation_duration_minutes":
-            # Mendeley timestamps mark the start of each valve-log interval.
-            # At timestamp t, only the preceding intervals have finished.
-            irrigation = irrigation.shift(1)
-        sector["soil_change_10m"] = moisture.diff()
-        sector["irrigation_10m"] = irrigation
-        sector["target"] = moisture.shift(-1)
-        frames.append(sector.reset_index())
-    return pd.concat(frames, ignore_index=True)
-
-
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--sensors", nargs="+", required=True)
-    parser.add_argument(
-        "--sensor-timezone", default="UTC",
-        help="Timezone of sensor timestamps without an offset (default: UTC).",
+    ax.scatter(
+        actual[~irrigated],
+        predictions[~irrigated],
+        s=9,
+        alpha=0.15,
+        color="tab:blue",
+        label="Without irrigation",
     )
-    parser.add_argument("--output", default="irrigation_rf_10m_1step.joblib")
+    ax.scatter(
+        actual[irrigated],
+        predictions[irrigated],
+        s=24,
+        alpha=0.8,
+        color="tab:orange",
+        label="With irrigation",
+    )
+
+    ax.plot([0, 100], [0, 100], "--", color="black", label="y = x")
+    ax.set(
+        xlim=(0, 100),
+        ylim=(0, 100),
+        xlabel="Actual soil moisture after 10 min (%)",
+        ylabel="Predicted soil moisture after 10 min (%)",
+        title="10-minute soil moisture forecast",
+    )
+    ax.set_aspect("equal", adjustable="box")
+    ax.legend()
+
+    fig.savefig(output_path, dpi=180)
+    plt.close(fig)
+
+
+def load_data(path: Path, features: list[str]) -> pd.DataFrame:
+    data = pd.read_csv(path)
+
+    required_columns = [*features, TARGET]
+    missing_columns = [
+        column for column in required_columns if column not in data.columns
+    ]
+    if missing_columns:
+        raise ValueError(f"{path.name}: missing columns {', '.join(missing_columns)}")
+
+    if data.empty:
+        raise ValueError(f"{path.name}: no rows")
+
+    # Only the moisture delta is allowed to be missing.
+    complete_columns = [
+        column for column in required_columns if column != DELTA_FEATURE
+    ]
+    columns_with_nulls = [
+        column for column in complete_columns if data[column].isna().any()
+    ]
+    if columns_with_nulls:
+        raise ValueError(
+            f"{path.name}: unexpected nulls in {', '.join(columns_with_nulls)}"
+        )
+
+    return data
+
+
+def report_test_results(test: pd.DataFrame, predictions) -> None:
+    test = test.assign(prediction=predictions)
+    irrigated = test["irrigation_next_10m"].gt(0)
+
+    groups = [
+        ("All test rows", test),
+        ("Without irrigation", test.loc[~irrigated]),
+        ("With irrigation", test.loc[irrigated]),
+    ]
+
+    for name, rows in groups:
+        if rows.empty:
+            print(f"{name}: no rows")
+            continue
+
+        mae = mean_absolute_error(rows[TARGET], rows["prediction"])
+        persistence_mae = mean_absolute_error(
+            rows[TARGET], rows["soil_moisture"]
+        )
+        print(
+            f"{name} ({len(rows):,} rows): "
+            f"RF MAE {mae:.3f} pp | "
+            f"persistence MAE {persistence_mae:.3f} pp"
+        )
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--train", type=Path, default=DATA_DIR / "train_data.csv")
+    parser.add_argument("--test", type=Path, default=DATA_DIR / "test_data.csv")
+    parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--without-delta",
+        action="store_true",
+        help="Train a comparison model without soil_delta_10m.",
+    )
     args = parser.parse_args()
 
-    data = prepare_sensors(args.sensors, args.sensor_timezone)
-    rows_before = len(data)
-    data = data.dropna(subset=[*FEATURES, "target"]).sort_values("timestamp")
-    print(f"Complete rows: {len(data):,}/{rows_before:,}")
+    features = BASE_FEATURES.copy()
+    if not args.without_delta:
+        features.append(DELTA_FEATURE)
 
-    times = data["timestamp"].drop_duplicates().reset_index(drop=True)
-    if len(times) < 30:
-        parser.error("Need at least 30 complete sensor timestamps.")
-    validation_start = times.iloc[int(len(times) * 0.70)]
-    test_start = times.iloc[int(len(times) * 0.85)]
-    train = data[data["timestamp"] + HORIZON < validation_start]
-    validation = data[
-        (data["timestamp"] >= validation_start)
-        & (data["timestamp"] + HORIZON < test_start)
-    ]
-    test = data[data["timestamp"] >= test_start]
-    if any(part.empty for part in (train, validation, test)):
-        parser.error("Not enough complete rows after splitting by time.")
+    train = load_data(args.train, features)
+    test = load_data(args.test, features)
 
-    model = RandomForestRegressor(
-        n_estimators=200, max_depth=10, min_samples_leaf=10,
-        random_state=42, n_jobs=-1,
+    model = Pipeline([
+        (
+            "imputer",
+            SimpleImputer(strategy="constant", fill_value=0, add_indicator=True),
+        ),
+        (
+            "forest",
+            RandomForestRegressor(
+                n_estimators=200,
+                max_depth=10,
+                min_samples_leaf=10,
+                random_state=42,
+                n_jobs=-1,
+            ),
+        ),
+    ])
+
+    print(f"Train: {len(train):,} rows | Test: {len(test):,} rows")
+    print(f"Features: {', '.join(features)}")
+
+    model.fit(train[features], train[TARGET])
+    predictions = model.predict(test[features])
+    report_test_results(test, model.predict(test[features]))
+
+    default_name = (
+        "irrigation_rf_10m_without_delta.joblib"
+        if args.without_delta
+        else "irrigation_rf_10m_with_delta.joblib"
     )
-    model.fit(train[FEATURES], train["target"])
-    for name, part in (("Validation", validation), ("Test", test)):
-        mae = mean_absolute_error(part["target"], model.predict(part[FEATURES]))
-        baseline = mean_absolute_error(part["target"], part["soil_moisture_pct"])
-        print(f"{name} ({len(part):,} rows): MAE {mae:.3f} pp, baseline {baseline:.3f} pp")
-
-    joblib.dump(model, args.output)
-    print(f"Saved model: {args.output}")
+    
+    output = args.output or SCRIPT_DIR / default_name
+    joblib.dump(model, output)
+    print(f"Saved model: {output}")
+    
+    plot_path = output.with_name(f"{output.stem}_scatter.png")
+    save_prediction_scatter(test, predictions, plot_path)
+    print(f"Saved scatter plot: {plot_path}")
 
 
 if __name__ == "__main__":
