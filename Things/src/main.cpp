@@ -7,7 +7,9 @@
 #include <cstring>
 #include <cstdlib>
 
-#include "Config.h"
+#include "Configuration/Config.h"
+#include "Configuration/DeviceConfig.h"
+#include "Configuration/ConfigPortal.h"
 
 #include "Identity/DeviceIdentity.h"
 #include "Sensors/SensorManager.h"
@@ -51,12 +53,16 @@ SensorManager sensorManager(
 DeviceIdentity deviceIdentity;
 
 // =====================================================
-// TELEMETRY
+// DEVICE CONFIGURATION
 // =====================================================
 
-TelemetryBuilder telemetryBuilder(
-    Config::ZONE_ID
-);
+DeviceConfigManager configManager;
+
+ConfigPortal configPortal;
+
+// TelemetryBuilder needs the runtime Zone ID.
+// It is initialized after loading configuration from NVS.
+TelemetryBuilder* telemetryBuilder = nullptr;
 
 // =====================================================
 // MQTT
@@ -82,6 +88,12 @@ volatile bool captureCommandPending = false;
 uint32_t lastTelemetryTime = 0;
 
 // =====================================================
+// WIFI CONFIGURATION
+// =====================================================
+
+constexpr uint32_t WIFI_CONNECT_TIMEOUT_MS = 15000;
+
+// =====================================================
 // NTP CONFIGURATION
 // =====================================================
 
@@ -95,7 +107,9 @@ constexpr std::time_t MIN_VALID_TIMESTAMP = 1700000000;
 // =====================================================
 
 void buildAndPrintTopics() {
-    const String siteId = Config::SITE_ID;
+    const DeviceConfig& config = configManager.get();
+
+    const String siteId = config.siteId;
     const String nodeId = deviceIdentity.getNodeId();
 
     telemetryTopic =
@@ -106,7 +120,7 @@ void buildAndPrintTopics() {
 
     String commandTopic =
         "iot/" +
-        String(Config::EDGE_ID) + "/" +
+        config.edgeId + "/" +
         nodeId +
         "/command";
 
@@ -161,7 +175,7 @@ String getVietnamTimestamp() {
 }
 
 // =====================================================
-// HANDLE CAMERA COMMAND
+// HANDLE CAPTURE COMMAND
 // =====================================================
 
 void handleCaptureCommand() {
@@ -298,11 +312,13 @@ void handleCameraResponse() {
 
 void handleTelemetry() {
 
+    const DeviceConfig& config = configManager.get();
+
     uint32_t currentTime = millis();
 
     if (
         currentTime - lastTelemetryTime <
-        Config::TELEMETRY_INTERVAL_MS
+        config.telemetryIntervalMs
     ) {
         return;
     }
@@ -331,7 +347,7 @@ void handleTelemetry() {
     // 4. Build telemetry.
     // ---------------------------------------------
 
-    TelemetryData telemetry = telemetryBuilder.build(
+    TelemetryData telemetry = telemetryBuilder->build(
         sensorData,
         deviceIdentity,
         sampledAt
@@ -341,7 +357,7 @@ void handleTelemetry() {
     // 5. Convert telemetry to JSON.
     // ---------------------------------------------
 
-    String payload = telemetryBuilder.toJson(telemetry);
+    String payload = telemetryBuilder->toJson(telemetry);
 
     // ---------------------------------------------
     // 6. Print telemetry.
@@ -352,6 +368,10 @@ void handleTelemetry() {
 
     Serial.print("[TELEMETRY] Sample sequence: ");
     Serial.println(sampleSequence);
+
+    Serial.print("[TELEMETRY] Interval: ");
+    Serial.print(config.telemetryIntervalMs);
+    Serial.println(" ms");
 
     Serial.print("[MQTT] Telemetry topic: ");
     Serial.println(telemetryTopic);
@@ -376,6 +396,121 @@ void handleTelemetry() {
             "[TELEMETRY] Publish request failed!"
         );
     }
+}
+
+// =====================================================
+// WIFI CONNECTION
+// =====================================================
+
+bool connectWiFi() {
+
+    const DeviceConfig& config = configManager.get();
+
+    Serial.println();
+    Serial.println("========== WIFI CONNECTION ==========");
+
+    WiFi.mode(WIFI_STA);
+
+    Serial.print("[WIFI] SSID: ");
+    Serial.println(config.wifiSSID);
+
+    WiFi.begin(
+        config.wifiSSID.c_str(),
+        config.wifiPassword.c_str()
+    );
+
+    Serial.print("[WIFI] Connecting");
+
+    uint32_t startTime = millis();
+
+    while (
+        WiFi.status() != WL_CONNECTED &&
+        millis() - startTime < WIFI_CONNECT_TIMEOUT_MS
+    ) {
+        delay(250);
+        Serial.print(".");
+    }
+
+    Serial.println();
+
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("[WIFI] Connection failed!");
+        Serial.println(
+            "[WIFI] Device will continue running. "
+            "Use GPIO25 to open configuration portal."
+        );
+
+        return false;
+    }
+
+    Serial.println("[WIFI] Connected!");
+
+    Serial.print("[WIFI] IP: ");
+    Serial.println(WiFi.localIP());
+
+    return true;
+}
+
+// =====================================================
+// NTP INITIALIZATION
+// =====================================================
+
+void initializeNTP() {
+
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println(
+            "[NTP] Skipped because WiFi is disconnected."
+        );
+
+        return;
+    }
+
+    Serial.println();
+    Serial.println("========== NTP INITIALIZATION ==========");
+
+    configTime(
+        0,
+        0,
+        NTP_SERVER,
+        SECONDARY_NTP_SERVER
+    );
+
+    Serial.println("[NTP] Synchronization requested.");
+}
+
+// =====================================================
+// MQTT INITIALIZATION
+// =====================================================
+
+void initializeMQTT() {
+
+    const DeviceConfig& config = configManager.get();
+
+    Serial.println();
+    Serial.println("========== MQTT INITIALIZATION ==========");
+
+    // Configure Edge capture command callback.
+    mqttClient.setCaptureCommandCallback([]() {
+
+        Serial.println(
+            "[COMMAND] Capture request received from Edge!"
+        );
+
+        captureCommandPending = true;
+    });
+
+    // Initialize MQTT with runtime configuration.
+    mqttClient.begin(
+        config.siteId.c_str(),
+        deviceIdentity.getNodeId(),
+        config.edgeId.c_str(),
+        config.mqttHost.c_str(),
+        config.mqttPort,
+        config.mqttUsername.c_str(),
+        config.mqttPassword.c_str()
+    );
+
+    buildAndPrintTopics();
 }
 
 // =====================================================
@@ -435,13 +570,7 @@ void setup() {
     );
 
     // ---------------------------------------------
-    // 2. Initialize WiFi.
-    // ---------------------------------------------
-
-    WiFi.mode(WIFI_AP_STA);
-
-    // ---------------------------------------------
-    // 3. Initialize device identity.
+    // 2. Initialize device identity.
     // ---------------------------------------------
 
     Serial.println();
@@ -453,7 +582,65 @@ void setup() {
     Serial.println(deviceIdentity.getNodeId());
 
     // ---------------------------------------------
-    // 4. Initialize sensors.
+    // 3. Load configuration from NVS.
+    // ---------------------------------------------
+
+    Serial.println();
+    Serial.println("========== CONFIGURATION INITIALIZATION ==========");
+
+    if (!configManager.begin()) {
+        Serial.println(
+            "[CONFIG] Failed to load configuration!"
+        );
+
+        Serial.println(
+            "[CONFIG] Device will use default configuration."
+        );
+    }
+
+    const DeviceConfig& config = configManager.get();
+
+    Serial.println("[CONFIG] Runtime configuration:");
+
+    Serial.print("[CONFIG] WiFi SSID: ");
+    Serial.println(config.wifiSSID);
+
+    Serial.print("[CONFIG] Site ID: ");
+    Serial.println(config.siteId);
+
+    Serial.print("[CONFIG] Zone ID: ");
+    Serial.println(config.zoneId);
+
+    Serial.print("[CONFIG] Edge ID: ");
+    Serial.println(config.edgeId);
+
+    Serial.print("[CONFIG] MQTT host: ");
+    Serial.println(config.mqttHost);
+
+    Serial.print("[CONFIG] MQTT port: ");
+    Serial.println(config.mqttPort);
+
+    Serial.print("[CONFIG] Telemetry interval: ");
+    Serial.print(config.telemetryIntervalMs);
+    Serial.println(" ms");
+
+    // Initialize TelemetryBuilder with runtime Zone ID.
+    telemetryBuilder = new TelemetryBuilder(config.zoneId);
+
+    // ---------------------------------------------
+    // 4. Initialize configuration portal.
+    // ---------------------------------------------
+
+    Serial.println();
+    Serial.println("========== CONFIGURATION PORTAL ==========");
+
+    configPortal.begin(&configManager);
+
+    Serial.println("[PORTAL] Ready!");
+    Serial.println("[PORTAL] Hold GPIO25 for 5 seconds to open AP.");
+
+    // ---------------------------------------------
+    // 5. Initialize sensors.
     // ---------------------------------------------
 
     Serial.println();
@@ -462,109 +649,24 @@ void setup() {
     sensorManager.begin();
 
     // ---------------------------------------------
-    // 5. Connect WiFi.
+    // 6. Connect WiFi.
     // ---------------------------------------------
 
-    Serial.println();
-    Serial.println("========== WIFI CONNECTION ==========");
+    bool wifiConnected = connectWiFi();
 
-    WiFi.begin(
-        Config::WIFI_SSID,
-        Config::WIFI_PASSWORD
-    );
+    // ---------------------------------------------
+    // 7. Initialize NTP.
+    // ---------------------------------------------
 
-    Serial.print("[WIFI] Connecting");
-
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-
-        Serial.print(".");
+    if (wifiConnected) {
+        initializeNTP();
     }
-
-    Serial.println();
-    Serial.println("[WIFI] Connected!");
-
-    Serial.print("[WIFI] IP: ");
-    Serial.println(WiFi.localIP());
-
-    // ---------------------------------------------
-    // 6. Synchronize time using NTP.
-    // ---------------------------------------------
-
-    Serial.println();
-    Serial.println("========== NTP SYNCHRONIZATION ==========");
-
-    configTime(
-        0,
-        0,
-        NTP_SERVER,
-        SECONDARY_NTP_SERVER
-    );
-
-    String sampledAt = "";
-
-    uint32_t ntpStartTime = millis();
-
-    while (
-        sampledAt.isEmpty() &&
-        millis() - ntpStartTime < 15000
-    ) {
-        sampledAt = getVietnamTimestamp();
-
-        if (sampledAt.isEmpty()) {
-            delay(500);
-
-            Serial.print(".");
-        }
-    }
-
-    if (!sampledAt.isEmpty()) {
-        Serial.println();
-        Serial.println("[NTP] Time synchronized!");
-
-        Serial.print("[NTP] Vietnam time: ");
-        Serial.println(sampledAt);
-    }
-    else {
-        Serial.println();
-        Serial.println("[NTP] Synchronization failed!");
-
-        Serial.println(
-            "[NTP] Timestamp unavailable until synchronized."
-        );
-    }
-
-    // ---------------------------------------------
-    // 7. Configure capture command callback.
-    // ---------------------------------------------
-
-    mqttClient.setCaptureCommandCallback([]() {
-        Serial.println(
-            "[COMMAND] Capture request received from Edge!"
-        );
-
-        captureCommandPending = true;
-    });
 
     // ---------------------------------------------
     // 8. Initialize MQTT.
     // ---------------------------------------------
 
-    Serial.println();
-    Serial.println("========== MQTT INITIALIZATION ==========");
-
-    mqttClient.begin(
-        Config::SITE_ID,
-        deviceIdentity.getNodeId(),
-        Config::EDGE_ID,
-        Config::MQTT_HOST,
-        Config::MQTT_PORT,
-        Config::MQTT_USERNAME,
-        Config::MQTT_PASSWORD
-    );
-
-    // Print MQTT topics.
-    buildAndPrintTopics();
+    initializeMQTT();
 
     // ---------------------------------------------
     // 9. Initialize sampling timer.
@@ -574,6 +676,13 @@ void setup() {
 
     Serial.println();
     Serial.println("========== SYSTEM READY ==========");
+
+    if (!wifiConnected) {
+        Serial.println(
+            "[SYSTEM] WiFi unavailable. Configuration portal "
+            "can be opened using GPIO25."
+        );
+    }
 }
 
 // =====================================================
@@ -583,41 +692,46 @@ void setup() {
 void loop() {
 
     // ---------------------------------------------
-    // 1. Maintain MQTT connection.
+    // 1. Handle configuration button and portal.
+    // ---------------------------------------------
+
+    configPortal.loop();
+
+    // ---------------------------------------------
+    // 2. Maintain MQTT connection.
     // ---------------------------------------------
 
     mqttClient.loop();
 
     // ---------------------------------------------
-    // 2. Handle pending Edge capture command.
+    // 3. Handle pending Edge capture command.
     // ---------------------------------------------
 
     handleCaptureCommand();
 
     // ---------------------------------------------
-    // 3. Receive camera data continuously.
+    // 4. Receive camera data continuously.
     // ---------------------------------------------
 
     cameraClient.loop();
 
     // ---------------------------------------------
-    // 4. Process camera response.
+    // 5. Process camera response.
     // ---------------------------------------------
 
     handleCameraResponse();
 
     // ---------------------------------------------
-    // 5. Wait for MQTT connection.
+    // 6. Wait for MQTT connection.
     // ---------------------------------------------
 
     if (!mqttClient.isConnected()) {
         delay(1);
-
         return;
     }
 
     // ---------------------------------------------
-    // 6. Read sensors and publish telemetry.
+    // 7. Read sensors and publish telemetry.
     // ---------------------------------------------
 
     handleTelemetry();
