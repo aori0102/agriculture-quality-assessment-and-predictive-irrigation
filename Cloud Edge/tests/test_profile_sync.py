@@ -4,11 +4,11 @@ from time import monotonic, sleep
 import unittest
 from unittest.mock import Mock, patch
 
-from Cloud.errors import CloudError
-from Cloud.profiles import ActiveProfile, ProfileApplyResult, illustrative_preset, validate_snapshot
-from Cloud.profile_sync import ProfileSync
-from Cloud.datastreams import BlynkTopics
-from Cloud.tests.test_profiles import draft
+from cloud_edge.errors import CloudError
+from cloud_edge.profiles import ActiveProfile, ProfileApplyResult, illustrative_preset, validate_snapshot
+from cloud_edge.profile_sync import ProfileSync
+from cloud_edge.datastreams import BlynkTopics
+from tests.test_profiles import draft
 
 
 def wait_until(predicate, timeout=2):
@@ -190,7 +190,7 @@ class ProfileSyncTests(unittest.TestCase):
         self.http.read_profile_snapshot.assert_not_called()
 
     def test_apply_expiring_during_read_never_reaches_backend(self):
-        with patch("Cloud.profile_sync.monotonic", return_value=100) as clock:
+        with patch("cloud_edge.profile_sync.monotonic", return_value=100) as clock:
             def read():
                 clock.return_value = 131
                 return draft()

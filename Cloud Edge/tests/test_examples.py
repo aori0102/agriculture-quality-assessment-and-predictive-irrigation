@@ -8,9 +8,9 @@ from paho.mqtt.packettypes import PacketTypes
 from paho.mqtt.reasoncodes import ReasonCode
 import requests
 
-from Cloud import CloudConfig
-from Cloud.datastreams import BlynkTopics
-from Cloud.examples import live_demo, smoke_http
+from cloud_edge import CloudConfig
+from cloud_edge.datastreams import BlynkTopics
+from examples import live_demo, smoke_http
 
 
 class ExampleTests(unittest.TestCase):
@@ -25,9 +25,9 @@ class ExampleTests(unittest.TestCase):
         self.network.subscribe.return_value = (mqtt.MQTT_ERR_SUCCESS, 7)
         self.network.loop_start.return_value = mqtt.MQTT_ERR_SUCCESS
         for target, replacement in (
-            ("Cloud.blynk_http.requests.Session", self.session),
-            ("Cloud.blynk_mqtt.mqtt.Client", self.network),
-            ("Cloud.config.CloudConfig.from_env", CloudConfig("sgp1.blynk.cloud", "test-secret")),
+            ("cloud_edge.blynk_http.requests.Session", self.session),
+            ("cloud_edge.blynk_mqtt.mqtt.Client", self.network),
+            ("cloud_edge.config.CloudConfig.from_env", CloudConfig("sgp1.blynk.cloud", "test-secret")),
         ):
             patcher = patch(target, return_value=replacement)
             patcher.start()
@@ -55,8 +55,8 @@ class ExampleTests(unittest.TestCase):
         self.network.loop_start.side_effect = connect_and_receive
         output = io.StringIO()
         with patch("sys.argv", ["live_demo", "--node-id", "node-1", "--duration", "2"]), \
-                patch("Cloud.examples.live_demo.monotonic", side_effect=[0, 1, 2]), \
-                patch("Cloud.examples.live_demo.sleep"), redirect_stdout(output):
+                patch("examples.live_demo.monotonic", side_effect=[0, 1, 2]), \
+                patch("examples.live_demo.sleep"), redirect_stdout(output):
             self.assertEqual(live_demo.main(), 0)
         self.assertIn("Request for node-1: ON", output.getvalue())
         self.assertIn("Command subscription ready", output.getvalue())

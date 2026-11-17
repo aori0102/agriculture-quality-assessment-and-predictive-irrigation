@@ -1,4 +1,4 @@
-# Cloud: edge-to-Blynk communication
+# Cloud Edge: Blynk communication and AI adapter
 
 `Cloud` runs inside the edge Python process. It uploads current measurements,
 AI results, and confirmed pump state over HTTPS, and receives dashboard pump
@@ -9,14 +9,14 @@ actuation remain the edge application's responsibilities.
 Plant profile synchronization is available through an optional Edge-supplied
 backend. See [Plant profiles and the AI handoff](PROFILES.md) for V7–V16 setup,
 Preset/Custom editing, multi-device bindings, and the persistence contract.
-Cloud does not implement the AI backend or change irrigation policy.
+Cloud Edge includes an adapter to the existing AI proxy; it does not change irrigation policy.
 
 ## Setup
 
 From the repository root, using the project's virtual environment:
 
 ```bash
-python -m pip install -r Cloud/requirements.txt
+python -m pip install -r "Cloud Edge/requirements.txt"
 ```
 
 Create a root `.env` using `.env.example` as a reference. Set `BLYNK_SERVER` to
@@ -38,7 +38,7 @@ return values, error categories, and command-handling examples.
 
 ```python
 from dataclasses import replace
-from Cloud import CloudClient, CloudConfig, CloudError, PumpCommand
+from cloud_edge import CloudClient, CloudConfig, CloudError, PumpCommand
 
 config = replace(CloudConfig.from_env(), http_timeout=10, command_lifetime=5)
 cloud = CloudClient(config, node_id="node-1")
@@ -170,7 +170,7 @@ and store requests; they never run inference, HTTP uploads, or hardware control.
 Run offline tests (no credentials, broker, or hardware needed):
 
 ```bash
-python -m unittest discover -s Cloud/tests -v
+PYTHONPATH="Cloud Edge" python -m unittest discover -s "Cloud Edge/tests" -t "Cloud Edge" -v
 ```
 
 The former manual `tests/test_blynk.py` is now an explicitly invoked example,
@@ -178,8 +178,8 @@ excluded from automated test discovery. These commands **do send sample values
 to your configured Blynk device**:
 
 ```bash
-python -m Cloud.examples.smoke_http --node-id node-1
-python -m Cloud.examples.live_demo --node-id node-1 --duration 60
+PYTHONPATH="Cloud Edge" python -m examples.smoke_http --node-id node-1
+PYTHONPATH="Cloud Edge" python -m examples.live_demo --node-id node-1 --duration 60
 ```
 
 The smoke example uploads one sensor batch without starting MQTT. The live demo
@@ -191,3 +191,13 @@ reports that its subscription is ready.
 Automated tests cover HTTP and MQTT through mocked transport boundaries. A live
 Blynk dashboard check and end-to-end hardware acknowledgements are separate
 integration checks; passing the offline suite does not establish either.
+
+## Run with the existing AI application
+
+```bash
+python "Cloud Edge/run_edge.py" --check
+python "Cloud Edge/run_edge.py"
+```
+
+See [PROFILES.md](PROFILES.md) for the existing AI configuration prerequisite,
+saved-versus-active semantics, metadata storage, and the adapter API.

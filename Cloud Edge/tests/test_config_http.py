@@ -7,9 +7,9 @@ from unittest.mock import Mock, patch
 
 import requests
 
-from Cloud.config import CloudConfig
-from Cloud.blynk_http import BlynkHTTP
-from Cloud.errors import CloudError
+from cloud_edge.config import CloudConfig
+from cloud_edge.blynk_http import BlynkHTTP
+from cloud_edge.errors import CloudError
 
 
 class ConfigTests(unittest.TestCase):
@@ -23,7 +23,7 @@ class ConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             env_file = Path(directory) / ".env"
             env_file.write_text("BLYNK_SERVER=sgp1.blynk.cloud\nBLYNK_AUTH_TOKEN=file-secret\n")
-            with patch("Cloud.config.ENV_FILE", env_file), \
+            with patch("cloud_edge.config.ENV_FILE", env_file), \
                     patch.dict(os.environ, {"BLYNK_AUTH_TOKEN": "env-secret"}, clear=True), \
                     patch("pathlib.Path.cwd", side_effect=AssertionError("cwd dependency")):
                 config = CloudConfig.from_env()
@@ -32,7 +32,7 @@ class ConfigTests(unittest.TestCase):
                 self.assertNotIn("BLYNK_SERVER", os.environ)
 
     def test_missing_configuration(self):
-        with patch("Cloud.config.dotenv_values", return_value={}), patch.dict(os.environ, {}, clear=True):
+        with patch("cloud_edge.config.dotenv_values", return_value={}), patch.dict(os.environ, {}, clear=True):
             with self.assertRaises(ValueError):
                 CloudConfig.from_env()
 
@@ -61,7 +61,7 @@ class HTTPTests(unittest.TestCase):
         self.response._content = b""
         self.response._content_consumed = True
         self.session.get.return_value = self.response
-        patcher = patch("Cloud.blynk_http.requests.Session", return_value=self.session)
+        patcher = patch("cloud_edge.blynk_http.requests.Session", return_value=self.session)
         patcher.start()
         self.addCleanup(patcher.stop)
         self.http = BlynkHTTP(CloudConfig("sgp1.blynk.cloud", "test-secret"))

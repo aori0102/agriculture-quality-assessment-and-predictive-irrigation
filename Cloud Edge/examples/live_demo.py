@@ -5,7 +5,7 @@ import math
 import sys
 from time import monotonic, sleep
 
-from Cloud import CloudClient, CloudConfig, CloudError
+from cloud_edge import CloudClient, CloudConfig, CloudError
 
 
 def main() -> int:

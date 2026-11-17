@@ -7,7 +7,7 @@ from time import monotonic
 from .blynk_http import BlynkHTTP
 from .datastreams import BlynkPins, BlynkTopics, PROFILE_FIELDS
 from .errors import CloudError
-from .profiles import ActiveProfile, ProfileApplyResult, ProfileBackend, illustrative_preset, validate_snapshot
+from .profiles import ActiveProfile, ProfileApplyResult, ProfileBackend, illustrative_preset, validate_snapshot, profiles_match
 
 
 class ProfileSync:
@@ -191,7 +191,9 @@ class ProfileSync:
         if active is None:
             return f"node={self._node_id}; no active profile"
         mode = "Preset (illustrative, unverified)" if active.profile.mode == "preset" else "Custom"
-        return f"node={self._node_id}; rev={active.revision}; {mode}; {active.irrigation_note}"
+        revision = f"; rev={active.revision}" if active.revision is not None else ""
+        metadata = "; metadata incomplete; complete form and Apply" if not active.metadata_complete else ""
+        return f"node={self._node_id}{revision}; {mode}; {active.irrigation_note}{metadata}"
 
     def _restore(self, epoch: int) -> None:
         active = self._backend_call(self._backend.get_active, self._node_id)
@@ -205,7 +207,7 @@ class ProfileSync:
             status = "UNCONFIGURED: " + self._describe_active(None)
         else:
             values = active.profile.to_datastreams()
-            status = "ACTIVE: " + self._describe_active(active)
+            status = ("SAVED: " if active.saved_only else "ACTIVE: ") + self._describe_active(active)
         status += "; unsaved drafts discarded"
         with self._condition:
             if self._live(epoch):
@@ -253,7 +255,7 @@ class ProfileSync:
         if not isinstance(result, ProfileApplyResult):
             raise CloudError("Edge returned an invalid application result.", category="backend")
         self._check_active(result.active)
-        if result.outcome == "applied" and result.active.profile != profile:
+        if result.outcome in ("applied", "saved") and not profiles_match(result.active.profile, profile):
             raise CloudError("Edge confirmed a different profile; inspect active state.", category="backend")
         status = result.outcome.upper() + ": " + self._describe_active(result.active)
         if result.message:

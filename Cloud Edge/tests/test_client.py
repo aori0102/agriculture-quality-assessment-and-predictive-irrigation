@@ -9,8 +9,8 @@ from paho.mqtt.packettypes import PacketTypes
 from paho.mqtt.reasoncodes import ReasonCode
 import requests
 
-from Cloud import CloudClient, CloudConfig, CloudError, PumpCommand
-from Cloud.datastreams import BlynkTopics
+from cloud_edge import CloudClient, CloudConfig, CloudError, PumpCommand
+from cloud_edge.datastreams import BlynkTopics
 
 
 class ClientTests(unittest.TestCase):
@@ -25,8 +25,8 @@ class ClientTests(unittest.TestCase):
         self.network.loop_start.return_value = mqtt.MQTT_ERR_SUCCESS
         self.network.subscribe.return_value = (mqtt.MQTT_ERR_SUCCESS, 7)
         for target, replacement in (
-            ("Cloud.blynk_http.requests.Session", self.session),
-            ("Cloud.blynk_mqtt.mqtt.Client", self.network),
+            ("cloud_edge.blynk_http.requests.Session", self.session),
+            ("cloud_edge.blynk_mqtt.mqtt.Client", self.network),
         ):
             patcher = patch(target, return_value=replacement)
             patcher.start()
@@ -73,8 +73,8 @@ class ClientTests(unittest.TestCase):
                 CloudClient(self.config, node_id=node_id)
 
     def test_construction_and_imports_do_not_connect(self):
-        import Cloud
-        importlib.reload(Cloud)
+        import cloud_edge
+        importlib.reload(cloud_edge)
         self.network.connect_async.assert_not_called()
         self.network.loop_start.assert_not_called()
         self.session.get.assert_not_called()

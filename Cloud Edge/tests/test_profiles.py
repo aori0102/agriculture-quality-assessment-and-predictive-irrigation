@@ -1,7 +1,7 @@
 from dataclasses import FrozenInstanceError, replace
 import unittest
 
-from Cloud.profiles import PlantProfile, illustrative_preset, validate_snapshot
+from cloud_edge.profiles import PlantProfile, illustrative_preset, validate_snapshot
 
 
 def draft(node_id="node-1", **changes):

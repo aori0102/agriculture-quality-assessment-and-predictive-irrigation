@@ -12,7 +12,7 @@ from collections.abc import Mapping
 from dotenv import dotenv_values
 
 
-ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
+ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
 
 @dataclass(frozen=True)

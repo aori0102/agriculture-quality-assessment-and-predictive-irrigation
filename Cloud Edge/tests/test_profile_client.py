@@ -6,11 +6,11 @@ import paho.mqtt.client as mqtt
 from paho.mqtt.packettypes import PacketTypes
 import requests
 
-from Cloud import CloudClient, CloudConfig
-from Cloud.datastreams import BlynkTopics
-from Cloud.tests.test_mqtt import reason
-from Cloud.tests.test_profiles import draft
-from Cloud.tests.test_profile_sync import FakeBackend, wait_until
+from cloud_edge import CloudClient, CloudConfig
+from cloud_edge.datastreams import BlynkTopics
+from tests.test_mqtt import reason
+from tests.test_profiles import draft
+from tests.test_profile_sync import FakeBackend, wait_until
 
 
 class ProfileClientTests(unittest.TestCase):
@@ -32,8 +32,8 @@ class ProfileClientTests(unittest.TestCase):
 
         self.session.get.side_effect = request
         for target, replacement in (
-            ("Cloud.blynk_mqtt.mqtt.Client", self.network),
-            ("Cloud.blynk_http.requests.Session", self.session),
+            ("cloud_edge.blynk_mqtt.mqtt.Client", self.network),
+            ("cloud_edge.blynk_http.requests.Session", self.session),
         ):
             patcher = patch(target, return_value=replacement)
             patcher.start()

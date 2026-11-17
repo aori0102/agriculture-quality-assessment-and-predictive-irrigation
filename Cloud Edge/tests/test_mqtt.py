@@ -11,10 +11,10 @@ import paho.mqtt.client as mqtt
 from paho.mqtt.packettypes import PacketTypes
 from paho.mqtt.reasoncodes import ReasonCode
 
-from Cloud.blynk_mqtt import BlynkMQTT
-from Cloud.config import CloudConfig
-from Cloud.datastreams import BlynkTopics
-from Cloud.errors import CloudError
+from cloud_edge.blynk_mqtt import BlynkMQTT
+from cloud_edge.config import CloudConfig
+from cloud_edge.datastreams import BlynkTopics
+from cloud_edge.errors import CloudError
 
 
 def reason(packet, value=0):
@@ -26,7 +26,7 @@ class MQTTTests(unittest.TestCase):
         self.network = Mock(spec=mqtt.Client)
         self.network.subscribe.return_value = (mqtt.MQTT_ERR_SUCCESS, 7)
         self.network.loop_start.return_value = mqtt.MQTT_ERR_SUCCESS
-        patcher = patch("Cloud.blynk_mqtt.mqtt.Client", return_value=self.network)
+        patcher = patch("cloud_edge.blynk_mqtt.mqtt.Client", return_value=self.network)
         self.factory = patcher.start()
         self.addCleanup(patcher.stop)
         self.adapter = BlynkMQTT(CloudConfig("sgp1.blynk.cloud", "test-secret"), node_id="node-1")
@@ -102,7 +102,7 @@ class MQTTTests(unittest.TestCase):
 
     def test_expiry_before_and_after_poll_uses_monotonic_time(self):
         self.ready()
-        with patch("Cloud.commands.monotonic", return_value=100) as clock:
+        with patch("cloud_edge.commands.monotonic", return_value=100) as clock:
             self.receive()
             command = self.adapter.poll_command()
             clock.return_value = 104.99
@@ -115,8 +115,8 @@ class MQTTTests(unittest.TestCase):
 
     def test_command_expiry_survives_wall_clock_adjustments(self):
         self.ready()
-        with patch("Cloud.commands.monotonic", return_value=100) as clock, \
-                patch("Cloud.commands.datetime") as wall_clock:
+        with patch("cloud_edge.commands.monotonic", return_value=100) as clock, \
+                patch("cloud_edge.commands.datetime") as wall_clock:
             wall_clock.now.return_value = datetime(2026, 1, 1, tzinfo=timezone.utc)
             self.receive()
             command = self.adapter.poll_command()
@@ -132,7 +132,7 @@ class MQTTTests(unittest.TestCase):
         adapter.start()
         self.network.on_connect(self.network, None, None, reason(PacketTypes.CONNACK), None)
         self.network.on_subscribe(self.network, None, 7, [reason(PacketTypes.SUBACK, 1)], None)
-        with patch("Cloud.commands.monotonic", return_value=10) as clock:
+        with patch("cloud_edge.commands.monotonic", return_value=10) as clock:
             self.receive()
             command = adapter.poll_command()
             self.assertEqual((command.expires_at - command.received_at).total_seconds(), 2)

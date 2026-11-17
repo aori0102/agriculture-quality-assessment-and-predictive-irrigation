@@ -14,3 +14,7 @@ __all__ = [
     "DeviceBinding", "load_device_bindings", "PlantProfile", "ActiveProfile",
     "ProfileApplyResult", "ProfileBackend", "illustrative_preset", "validate_snapshot",
 ]
+
+from .edge_profiles import EdgeProfileBackend
+
+__all__.append("EdgeProfileBackend")

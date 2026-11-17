@@ -1,6 +1,7 @@
 """Pure profile contracts shared with Edge; no persistence or irrigation policy."""
 
 from dataclasses import dataclass
+import math
 from typing import Literal, Protocol
 
 from .datastreams import PROFILE_FIELDS, BlynkPins
@@ -45,7 +46,8 @@ class PlantProfile:
         if self.mode == "preset":
             if self.preset_key != PRESET_KEY:
                 raise ValueError("Unknown profile preset.")
-            if tuple(getattr(self, name) for name in THRESHOLD_FIELDS) != PRESET_THRESHOLDS:
+            if not all(math.isclose(getattr(self, name), expected, rel_tol=1e-9, abs_tol=1e-12)
+                       for name, expected in zip(THRESHOLD_FIELDS, PRESET_THRESHOLDS)):
                 raise ValueError("Switch to Custom to use edited thresholds.")
         elif self.mode != "custom" or self.preset_key is not None:
             raise ValueError("Custom profiles must not specify a preset key.")
@@ -91,15 +93,18 @@ def illustrative_preset(node_id: str, description: str = "") -> PlantProfile:
 
 @dataclass(frozen=True)
 class ActiveProfile:
-    """Edge-confirmed durable state; irrigation_note is supplied by Edge."""
+    """Confirmed state. saved_only distinguishes storage from irrigation adoption."""
     profile: PlantProfile
-    revision: int
+    revision: int | None
     irrigation_note: str = "Irrigation eligibility not reported by Edge"
+
+    metadata_complete: bool = True
+    saved_only: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.profile, PlantProfile):
             raise ValueError("active profile must contain a validated PlantProfile.")
-        if type(self.revision) is not int or self.revision < 1:
+        if self.revision is not None and (type(self.revision) is not int or self.revision < 1):
             raise ValueError("revision must be a positive integer.")
         _text(self.irrigation_note, "irrigation_note")
 
@@ -110,28 +115,38 @@ class ProfileApplyResult:
 
     Messages must be safe for dashboard display (no credentials or internals).
     """
-    outcome: Literal["applied", "rejected", "sync_failed"]
+    outcome: Literal["applied", "saved", "rejected", "sync_failed"]
     active: ActiveProfile | None
     message: str = ""
 
     def __post_init__(self) -> None:
-        if self.outcome not in ("applied", "rejected", "sync_failed"):
+        if self.outcome not in ("applied", "saved", "rejected", "sync_failed"):
             raise ValueError("Unknown profile application outcome.")
         if self.active is not None and not isinstance(self.active, ActiveProfile):
             raise ValueError("active must be an ActiveProfile or None.")
-        if self.outcome == "applied" and self.active is None:
+        if self.outcome in ("applied", "saved") and self.active is None:
             raise ValueError("Successful application requires Edge-confirmed active state.")
         _text(self.message, "message", allow_empty=True)
 
 
 class ProfileBackend(Protocol):
-    """Implemented by Edge. Called on a Cloud worker, never an MQTT callback.
+    """Integration boundary, implemented by an adapter or Edge-supplied backend.
+
+    Called on a Cloud worker, never an MQTT callback.
 
     Operations must be bounded and thread-safe across node workers. Persist
-    atomically before success; preserve the last valid state on failure. Make
+    atomically when supported; report uncertainty when legacy storage fails. Make
     identical applications idempotent. These methods must not actuate hardware.
     """
 
     def get_active(self, node_id: str) -> ActiveProfile | None: ...
 
     def apply_profile(self, profile: PlantProfile) -> ProfileApplyResult: ...
+
+
+def profiles_match(left: PlantProfile, right: PlantProfile) -> bool:
+    """Compare round-tripped fractions without discarding metadata differences."""
+    return all(getattr(left, key) == getattr(right, key) for key in (
+        "node_id", "node_description", "plant_name", "mode", "preset_key"
+    )) and all(math.isclose(getattr(left, key), getattr(right, key), rel_tol=1e-9, abs_tol=1e-12)
+               for key in THRESHOLD_FIELDS)

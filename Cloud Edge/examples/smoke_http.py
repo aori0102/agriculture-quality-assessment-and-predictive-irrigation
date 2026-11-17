@@ -1,9 +1,9 @@
-"""Run explicitly: python -m Cloud.examples.smoke_http --node-id YOUR_NODE."""
+"""Run explicitly: python -m examples.smoke_http --node-id YOUR_NODE."""
 
 import argparse
 import sys
 
-from Cloud import CloudClient, CloudConfig, CloudError
+from cloud_edge import CloudClient, CloudConfig, CloudError
 
 
 def main() -> int:

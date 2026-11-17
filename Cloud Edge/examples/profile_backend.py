@@ -7,7 +7,7 @@ from contextlib import ExitStack, contextmanager
 from dataclasses import replace
 from threading import Lock
 
-from Cloud import (
+from cloud_edge import (
     ActiveProfile, CloudClient, ProfileApplyResult, ProfileBackend,
     PlantProfile, illustrative_preset, load_device_bindings,
 )

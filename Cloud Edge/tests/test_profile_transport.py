@@ -4,10 +4,10 @@ from unittest.mock import Mock, patch
 
 import requests
 
-from Cloud.blynk_http import BlynkHTTP
-from Cloud.config import CloudConfig, load_device_bindings
-from Cloud.errors import CloudError
-from Cloud.tests.test_profiles import draft
+from cloud_edge.blynk_http import BlynkHTTP
+from cloud_edge.config import CloudConfig, load_device_bindings
+from cloud_edge.errors import CloudError
+from tests.test_profiles import draft
 
 
 class ProfileHTTPTests(unittest.TestCase):
@@ -18,7 +18,7 @@ class ProfileHTTPTests(unittest.TestCase):
         self.response._content = json.dumps(draft()).encode()
         self.response._content_consumed = True
         self.session.get.return_value = self.response
-        patcher = patch("Cloud.blynk_http.requests.Session", return_value=self.session)
+        patcher = patch("cloud_edge.blynk_http.requests.Session", return_value=self.session)
         patcher.start()
         self.addCleanup(patcher.stop)
         self.http = BlynkHTTP(CloudConfig("sgp1.blynk.cloud", "test-secret"))

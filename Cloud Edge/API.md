@@ -5,11 +5,11 @@ For the optional `profile_backend` constructor argument, profile types,
 configuration, see the [profile API and Edge handoff](PROFILES.md).
 Existing calls without a profile backend retain their behavior.
 
-Import the public interface from `Cloud`. Protocol adapters are internal details;
+Import the public interface from `cloud_edge`. Protocol adapters are internal details;
 consumers do not need to import `blynk_http` or `blynk_mqtt`.
 
 ```python
-from Cloud import CloudClient, CloudConfig, CloudError, PumpCommand
+from cloud_edge import CloudClient, CloudConfig, CloudError, PumpCommand
 ```
 
 See the [setup guide](README.md#setup) for dependencies and credentials, and
