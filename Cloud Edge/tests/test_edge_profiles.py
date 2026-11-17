@@ -182,3 +182,14 @@ class RealEdgeContractTests(unittest.TestCase):
             self.assertEqual(restored.profile.node_description, 'Temporary test')
             self.assertEqual(restored.profile.mode, 'preset')
             self.assertNotIn('mad', restarted.load_log()['node_profile']['one'])
+            from cloud_edge.edge_pump import EdgePumpBackend
+            from cloud_edge.commands import PumpCommand
+            from tests.test_edge_pump import Client
+            pump_backend = EdgePumpBackend(proxy.enable_irrigation_on_node,
+                proxy.disable_irrigation_on_node, manager.load_log)
+            client = Client()
+            for requested in (True, False):
+                client.pending = PumpCommand._received('one', requested, 5)
+                self.assertEqual(pump_backend.try_dispatch(client, 'one').outcome, 'saved')
+                self.assertIs(restarted.load_log()['node_profile']['one']['irrigation_status'], requested)
+                self.assertEqual(restarted.load_log()['node_profile']['one']['plant'], profile.plant_name)

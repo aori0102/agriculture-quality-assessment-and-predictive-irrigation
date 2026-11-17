@@ -37,13 +37,13 @@ class EdgeProfileBackend:
     """
 
     def __init__(self, update_node_profile: Callable, load_log: Callable,
-                 metadata_path: Path = DEFAULT_METADATA_PATH):
+                 metadata_path: Path = DEFAULT_METADATA_PATH, *, operation_lock=None):
         if not callable(update_node_profile) or not callable(load_log):
             raise ValueError('Edge update and read functions must be callable.')
         self._update = update_node_profile
         self._load_log = load_log
         self._metadata_path = Path(metadata_path)
-        self._lock = RLock()
+        self._lock = operation_lock if operation_lock is not None else RLock()
 
     def _record(self, node_id: str) -> dict | None:
         log = self._load_log()

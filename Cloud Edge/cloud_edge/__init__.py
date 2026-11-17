@@ -18,3 +18,7 @@ __all__ = [
 from .edge_profiles import EdgeProfileBackend
 
 __all__.append("EdgeProfileBackend")
+
+from .edge_pump import EdgePumpBackend, PumpDispatcher, PumpRequestResult
+
+__all__.extend(["EdgePumpBackend", "PumpDispatcher", "PumpRequestResult"])

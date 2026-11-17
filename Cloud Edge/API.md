@@ -236,3 +236,12 @@ failures can also be raised by `start()`.
 For MQTT terminal errors, close the old client before creating its replacement.
 Only one MQTT connection may use a device token at a time. Messages omit
 credentials and request URLs; do not add token-bearing configuration to logs.
+
+## Edge irrigation-request adapter
+
+`EdgePumpBackend`, `PumpDispatcher`, and `PumpRequestResult` are exported from
+`cloud_edge`. See [PUMP_COMMANDS.md](PUMP_COMMANDS.md) for constructors, shared-lock
+requirements, local result accessors, and lifecycle. The launcher enables this
+integration; a standalone `CloudClient` continues to expose manual `poll_command()`.
+`command_connection_id` exposes the MQTT connection generation for stale-request
+checks without changing the existing `PumpCommand` or polling contracts.

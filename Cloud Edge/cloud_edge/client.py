@@ -46,6 +46,11 @@ class CloudClient:
         self._closed = False
 
     @property
+    def command_connection_id(self) -> int:
+        """Connection generation used to invalidate in-flight request reads."""
+        return self._mqtt.command_connection_id
+
+    @property
     def commands_ready(self) -> bool:
         """Whether MQTT is connected and its command subscription is accepted."""
         return self._mqtt.commands_ready

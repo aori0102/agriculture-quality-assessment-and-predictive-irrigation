@@ -7,10 +7,12 @@ import importlib
 import json
 from pathlib import Path
 import sys
+from threading import RLock
 
 from .client import CloudClient
 from .config import load_device_bindings
 from .edge_profiles import EdgeProfileBackend
+from .edge_pump import EdgePumpBackend, PumpDispatcher
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 
@@ -30,13 +32,20 @@ def check_edge_config(ai_directory: Path) -> None:
         raise ValueError('AI/config.cfg is unreadable or default_node_profile is not valid JSON.') from None
 
 
-def run_with_clients(edge_main, backend, bindings, *, client_factory=CloudClient):
+def run_with_clients(edge_main, backend, bindings, *, client_factory=CloudClient,
+                     pump_backend=None, dispatcher_factory=PumpDispatcher):
     """One shared adapter across all devices; close even after partial startup."""
     with ExitStack() as resources:
+        clients = {}
         for binding in bindings:
             client = client_factory(binding.config, node_id=binding.node_id, profile_backend=backend)
             resources.callback(client.close)
             client.start()
+            clients[binding.node_id] = client
+        if pump_backend is not None:
+            dispatcher = dispatcher_factory(clients, pump_backend)
+            resources.callback(dispatcher.close)  # Stop before closing clients.
+            dispatcher.start()
         return edge_main()
 
 
@@ -64,9 +73,13 @@ def main(argv=None) -> int:
     except Exception:
         print('AI initialization failed; verify AI configuration, dependencies, and model files.', file=sys.stderr)
         return 2
-    backend = EdgeProfileBackend(proxy.update_node_profile, proxy.operation_log_manager.load_log)
+    operation_lock = RLock()
+    backend = EdgeProfileBackend(proxy.update_node_profile, proxy.operation_log_manager.load_log,
+                                 operation_lock=operation_lock)
+    pump_backend = EdgePumpBackend(proxy.enable_irrigation_on_node, proxy.disable_irrigation_on_node,
+                                   proxy.operation_log_manager.load_log, operation_lock=operation_lock)
     try:
-        run_with_clients(app.main, backend, bindings)
+        run_with_clients(app.main, backend, bindings, pump_backend=pump_backend)
     except KeyboardInterrupt:
         return 0
     except Exception:

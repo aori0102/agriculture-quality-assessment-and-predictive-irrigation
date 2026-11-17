@@ -28,6 +28,7 @@ class BlynkMQTT:
         self._started = False
         self._terminal = False
         self._ready = False
+        self._connection_id = 0
         self._subscription_mid: int | None = None
         self._pending: PumpCommand | None = None
         self._error: CloudError | None = None
@@ -45,6 +46,11 @@ class BlynkMQTT:
         self._client.on_subscribe = self._on_subscribe
         self._client.on_disconnect = self._on_disconnect
         self._client.on_message = self._on_message
+
+    @property
+    def command_connection_id(self) -> int:
+        with self._lock:
+            return self._connection_id
 
     @property
     def commands_ready(self) -> bool:
@@ -118,6 +124,7 @@ class BlynkMQTT:
 
     def _on_connect(self, client, userdata, flags, reason_code, properties) -> None:
         with self._lock:
+            self._connection_id += 1
             inactive = self._closed or self._terminal
             self._ready = False
             self._pending = None
@@ -175,6 +182,7 @@ class BlynkMQTT:
 
     def _on_disconnect(self, client, userdata, flags, reason_code, properties) -> None:
         with self._lock:
+            self._connection_id += 1
             self._ready = False
             self._pending = None
             self._subscription_mid = None

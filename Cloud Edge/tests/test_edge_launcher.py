@@ -46,3 +46,15 @@ class LauncherTests(unittest.TestCase):
             self.assertEqual(main(['--check']), 0)
             imports.assert_not_called()
             run.assert_not_called()
+
+    def test_dispatcher_stops_before_clients_even_when_start_fails(self):
+        events = []
+        client, dispatcher = Mock(), Mock()
+        client.close.side_effect = lambda: events.append('client')
+        dispatcher.close.side_effect = lambda: events.append('dispatcher')
+        dispatcher.start.side_effect = RuntimeError('startup failed')
+        with self.assertRaises(RuntimeError):
+            run_with_clients(Mock(), object(), [SimpleNamespace(node_id='one', config=object())],
+                client_factory=Mock(return_value=client), pump_backend=object(),
+                dispatcher_factory=Mock(return_value=dispatcher))
+        self.assertEqual(events, ['dispatcher', 'client'])

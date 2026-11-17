@@ -201,3 +201,7 @@ python "Cloud Edge/run_edge.py"
 
 See [PROFILES.md](PROFILES.md) for the existing AI configuration prerequisite,
 saved-versus-active semantics, metadata storage, and the adapter API.
+
+The launcher also forwards V3 requests to the existing AI enable/disable
+interfaces. See [pump-request wiring](PUMP_COMMANDS.md). Success verifies the saved
+irrigation flag; it does not update V4 or confirm physical pump execution.
