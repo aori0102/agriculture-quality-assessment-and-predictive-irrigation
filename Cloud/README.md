@@ -6,6 +6,11 @@ requests over MQTT/TLS. Importing the package or constructing a client does not
 connect to Blynk. AI inference, irrigation policy, local MQTT, and hardware
 actuation remain the edge application's responsibilities.
 
+Plant profile synchronization is available through an optional Edge-supplied
+backend. See [Plant profiles and the AI handoff](PROFILES.md) for V7–V16 setup,
+Preset/Custom editing, multi-device bindings, and the persistence contract.
+Cloud does not implement the AI backend or change irrigation policy.
+
 ## Setup
 
 From the repository root, using the project's virtual environment:
@@ -84,7 +89,7 @@ outside this package's scope.
 Uploads are synchronous and serialized. Schedule them outside MQTT callbacks
 and time-sensitive edge work, using the caller's worker if necessary. Select an
 upload interval that fits your Blynk message quota and batch values from the
-same processing cycle. There is no automatic retry, offline buffer, scheduler,
+same processing cycle. Telemetry uploads have no automatic retry, offline buffer, scheduler,
 or historical backfill. The edge keeps original sample timestamps and decides
 which current readings are valid to upload. `None` readings are omitted; an
 empty snapshot sends nothing. Closing waits for any active upload to finish.

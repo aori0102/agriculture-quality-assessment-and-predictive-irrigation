@@ -1,5 +1,10 @@
 # Cloud public API reference
 
+For the optional `profile_backend` constructor argument, profile types,
+`profiles_ready`, `last_profile_status`, `last_profile_error`, and multi-device
+configuration, see the [profile API and Edge handoff](PROFILES.md).
+Existing calls without a profile backend retain their behavior.
+
 Import the public interface from `Cloud`. Protocol adapters are internal details;
 consumers do not need to import `blynk_http` or `blynk_mqtt`.
 
@@ -224,6 +229,9 @@ failures can also be raised by `start()`.
 | `subscription` | MQTT subscription failed; check configuration/permissions. |
 | `startup` | MQTT network loop could not start. |
 | `closed` | Create a new client if further operations are required. |
+| `response` | Profile HTTP response was not a valid scalar-object response. |
+| `backend` | Edge profile operation failed or returned inconsistent state. |
+| `busy` | Profile event queue is full; wait for current work and retry. |
 
 For MQTT terminal errors, close the old client before creating its replacement.
 Only one MQTT connection may use a device token at a time. Messages omit

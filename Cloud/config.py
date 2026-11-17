@@ -3,9 +3,11 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 import math
+import json
 import os
 from pathlib import Path
 import re
+from collections.abc import Mapping
 
 from dotenv import dotenv_values
 
@@ -64,3 +66,42 @@ class CloudConfig:
             server=(values.get("BLYNK_SERVER") or "").strip(),
             auth_token=(values.get("BLYNK_AUTH_TOKEN") or "").strip(),
         )
+
+
+@dataclass(frozen=True)
+class DeviceBinding:
+    node_id: str
+    config: CloudConfig
+
+
+def load_device_bindings(values: Mapping[str, str] | None = None) -> tuple[DeviceBinding, ...]:
+    """Load BLYNK_DEVICES_JSON and referenced tokens, without connecting.
+
+    Each entry has node_id, server, auth_token_env. Explicit values are useful
+    for embedding/tests; otherwise process environment overrides root .env.
+    Reject the entire configuration before callers construct any clients.
+    """
+    if values is None:
+        values = {**dotenv_values(ENV_FILE, interpolate=False), **os.environ}
+    try:
+        entries = json.loads(values.get("BLYNK_DEVICES_JSON", ""))
+    except (TypeError, ValueError):
+        raise ValueError("BLYNK_DEVICES_JSON must be a nonempty JSON array.") from None
+    if not isinstance(entries, list) or not entries:
+        raise ValueError("BLYNK_DEVICES_JSON must be a nonempty JSON array.")
+    bindings, nodes, tokens = [], set(), set()
+    for entry in entries:
+        if not isinstance(entry, dict) or set(entry) != {"node_id", "server", "auth_token_env"}:
+            raise ValueError("Each device binding requires node_id, server, auth_token_env only.")
+        node_id, token_env = entry["node_id"], entry["auth_token_env"]
+        if not isinstance(node_id, str) or not node_id.strip() or len(node_id) > 128 or not node_id.isprintable():
+            raise ValueError("Binding node_id must be nonempty printable text of at most 128 characters.")
+        if not isinstance(token_env, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", token_env):
+            raise ValueError("auth_token_env must name an environment variable.")
+        config = CloudConfig(server=entry["server"], auth_token=values.get(token_env, ""))
+        if node_id in nodes or config.auth_token in tokens:
+            raise ValueError("Device bindings must have unique node IDs and unique tokens.")
+        nodes.add(node_id)
+        tokens.add(config.auth_token)
+        bindings.append(DeviceBinding(node_id, config))
+    return tuple(bindings)
