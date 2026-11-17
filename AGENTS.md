@@ -140,17 +140,17 @@ The existing Blynk template is named `BTL` and uses these mappings:
 
 | Virtual pin | Datastream name | Type | Meaning |
 | --- | --- | --- | --- |
-| `V0` | `soil_index_pct` | Integer | Soil moisture percentage |
-| `V1` | `temperature_c` | Double | Temperature in Celsius |
-| `V2` | `Plant Status` | String | Plant assessment/status |
-| `V3` | `Pump Command` | Integer (`0`/`1`) | Requested pump state |
-| `V4` | `Pump Status` | Integer (`0`/`1`) | Confirmed pump state |
-| `V5` | `Predicted Moisture` | Integer | Predicted soil moisture percentage |
-| `V6` | `air_humidity_pct` | Integer | Relative air humidity percentage |
+| `V0` | `soil_moisture` | Integer | Soil moisture percentage |
+| `V1` | `weather_temp` | Double | Temperature in Celsius |
+| `V2` | `plant_status` | String | Plant assessment/status |
+| `V3` | `pump_command` | Integer (`0`/`1`) | Requested pump state |
+| `V4` | `pump_status` | Integer (`0`/`1`) | Confirmed pump state |
+| `V5` | `predicted_moisture` | Integer | Predicted soil moisture percentage |
+| `V6` | `weather_humidity` | Integer | Relative air humidity percentage |
 
 - Blynk HTTPS APIs identify datastreams by virtual pins such as `v0` and `v1`.
 - Blynk Device MQTT API identifies them by **exact datastream names**, including spaces and capitalization.
-- Subscribe to `downlink/ds/Pump Command` for command changes.
+- Subscribe to `downlink/ds/pump_command` for command changes.
 - `V3` is a requested state; **never equate it with actual status `V4`** without a verified device acknowledgement.
 - Do not silently change pins or names without coordinating changes in the Blynk template and all clients.
 - Validate values against the configured datastream types and ranges. An integer dashboard stream may require explicit rounding of floating-point predictions.
@@ -168,7 +168,7 @@ The existing Blynk template is named `BTL` and uses these mappings:
 ## Reliability and Safety Rules
 
 1. **Fail safely:** Network loss, stale telemetry, invalid readings, or missing acknowledgements must never implicitly start a pump.
-2. **Separate intent and fact:** Record a user's command separately from the physical pump status; update `Pump Status` only after an appropriate confirmation.
+2. **Separate intent and fact:** Record a user's command separately from the physical pump status; update `pump_status` only after an appropriate confirmation.
 3. **Validate command inputs:** Accept only documented actions, values, targets, and durations. Apply irrigation safety limits at the Edge/device layers.
 4. **Prevent stale execution:** MQTT clean sessions do not guarantee delivery while disconnected. Reconnection/state-sync handling must not replay an old `ON` command blindly.
 5. **Keep callbacks short:** Network callbacks should validate and enqueue work; avoid blocking them with inference, HTTP requests, sleeps, or physical actuation.
@@ -193,7 +193,7 @@ The existing Blynk template is named `BTL` and uses these mappings:
 - [ ] Edge receives it, verifies identity/timestamp/quality, and records accepted readings.
 - [ ] Edge can send `V0`, `V1`, and `V6` to Blynk with one HTTPS Batch request.
 - [ ] Edge can publish AI outputs to `V2` and `V5` with their configured types.
-- [ ] A Blynk switch bound to `V3` produces `downlink/ds/Pump Command` messages received by the Edge process.
+- [ ] A Blynk switch bound to `V3` produces `downlink/ds/pump_command` messages received by the Edge process.
 - [ ] Edge applies command validation and forwards an authorized command on the correct local MQTT topic.
 - [ ] The ESP32 acknowledges or reports the actual pump state before Edge updates `V4`.
 - [ ] Disconnect/reconnect, malformed payloads, invalid values, and timeout cases are tested.
@@ -205,6 +205,6 @@ The existing Blynk template is named `BTL` and uses these mappings:
 - Align requested irrigation durations with the maximum allowed duration in Edge configuration and with firmware behavior.
 - Define the end-to-end command acknowledgement, timeout, and cancellation behavior.
 - Decide how often telemetry should be sent to Blynk to stay within the plan's message quota.
-- Confirm which computer-vision outputs are ready for the `Plant Status` datastream.
+- Confirm which computer-vision outputs are ready for the `plant_status` datastream.
 
 Treat these as unresolved design decisions, not already implemented guarantees.

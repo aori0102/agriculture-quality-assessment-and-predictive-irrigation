@@ -86,6 +86,14 @@ class MQTTTests(unittest.TestCase):
         with self.assertRaises(FrozenInstanceError):
             command.requested_on = True
 
+    def test_current_template_command_name_is_used_exactly(self):
+        self.ready()
+        self.network.subscribe.assert_called_once_with("downlink/ds/pump_command", qos=1)
+        self.receive(topic="downlink/ds/Pump Command")
+        self.assertIsNone(self.adapter.poll_command())
+        self.receive(topic="downlink/ds/pump_command")
+        self.assertTrue(self.adapter.poll_command().requested_on)
+
     def test_only_fresh_valid_command_messages_are_accepted(self):
         self.receive()
         self.assertIsNone(self.adapter.poll_command())
@@ -95,7 +103,7 @@ class MQTTTests(unittest.TestCase):
                 self.receive(value)
                 self.assertIsNone(self.adapter.poll_command())
         self.receive(retain=True)
-        self.receive(topic="downlink/ds/Pump Status")
+        self.receive(topic="downlink/ds/pump_status")
         self.assertIsNone(self.adapter.poll_command())
         self.receive(b"1")
         self.assertTrue(self.adapter.poll_command().requested_on)

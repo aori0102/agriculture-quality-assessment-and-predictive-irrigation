@@ -98,13 +98,17 @@ empty snapshot sends nothing. Closing waits for any active upload to finish.
 
 | Pin | Blynk datastream name | Upload/input type |
 | --- | --- | --- |
-| V0 | `soil_index_pct` | Percentage, converted to integer |
-| V1 | `temperature_c` | Finite number, sent as float |
-| V2 | `Plant Status` | String supplied by the edge |
-| V3 | `Pump Command` | Inbound `0`/`1`; never uploaded by this package |
-| V4 | `Pump Status` | Confirmed boolean, uploaded as `0`/`1` |
-| V5 | `Predicted Moisture` | Percentage, converted to integer |
-| V6 | `air_humidity_pct` | Percentage, converted to integer |
+| V0 | `soil_moisture` | Percentage, converted to integer |
+| V1 | `weather_temp` | Finite number, sent as float |
+| V2 | `plant_status` | String supplied by the edge |
+| V3 | `pump_command` | Inbound `0`/`1`; never uploaded by this package |
+| V4 | `pump_status` | Confirmed boolean, uploaded as `0`/`1` |
+| V5 | `predicted_moisture` | Percentage, converted to integer |
+| V6 | `weather_humidity` | Percentage, converted to integer |
+
+These names match the current BTL template export. The Edge-facing Python
+arguments remain `soil_index_pct`, `temperature_c`, `air_humidity_pct`, and
+`predicted_moisture_pct`; HTTPS uploads still address the same virtual pins.
 
 Percentages must be within 0–100 before rounding to the nearest integer, with
 halves rounded upward. Booleans are not measurements, and NaN/infinity are
@@ -121,7 +125,7 @@ the correct regional hostname. Errors omit request URLs and credentials.
 
 The MQTT adapter uses [Blynk Device MQTT authentication](https://docs.blynk.io/en/blynk.cloud-mqtt-api/device-mqtt-api/authentication)
 over verified TLS, with a clean session and QoS 1 subscription to
-`downlink/ds/Pump Command`. MQTT uses the exact datastream **name**, including
+`downlink/ds/pump_command`. MQTT uses the exact datastream **name**, including
 spaces and capitalization, rather than virtual pin `v3`.
 
 The pending slot holds the latest requested state only. ON then OFF before a
@@ -166,6 +170,18 @@ and create a new client after closing the old one. Normal callbacks only validat
 and store requests; they never run inference, HTTP uploads, or hardware control.
 
 ## Verification and live examples
+
+For a guided test of **all V0–V16** with a fake Edge dataset, an in-memory
+profile backend, and explicit simulated pump acknowledgements, follow
+[the live-test runbook](LIVE_TEST.md). Launch it explicitly with:
+
+```bash
+PYTHONPATH="Cloud Edge" python -m examples.simulated_edge --node-id demo-node
+```
+
+This writes simulated values to the configured test device. It does not import
+the AI application or connect to hardware. Dashboard observations are recorded
+manually; offline test success alone does not establish live coverage.
 
 Run offline tests (no credentials, broker, or hardware needed):
 

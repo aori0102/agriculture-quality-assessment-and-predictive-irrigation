@@ -19,7 +19,7 @@ class BlynkPins:
 
 
 class BlynkTopics:
-    PUMP_COMMAND = "downlink/ds/Pump Command"
+    PUMP_COMMAND = "downlink/ds/pump_command"
     REDIRECT = "downlink/redirect"
     APPLY_PROFILE = "downlink/ds/apply_profile"
     PROFILE_PRESET = "downlink/ds/profile_preset"

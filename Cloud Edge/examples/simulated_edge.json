@@ -1,0 +1,6 @@
+[
+  {"scenario": "normal-fractional", "node_id": "$NODE_ID", "soil_index_pct": 42.5, "temperature_c": 28.5, "air_humidity_pct": 65.5, "plant_status": "SIMULATED: Healthy", "predicted_moisture_pct": 40.5},
+  {"scenario": "dry", "node_id": "$NODE_ID", "soil_index_pct": 18, "temperature_c": 33.2, "air_humidity_pct": 48, "plant_status": "SIMULATED: Dry", "predicted_moisture_pct": 15},
+  {"scenario": "wet", "node_id": "$NODE_ID", "soil_index_pct": 78, "temperature_c": 26.0, "air_humidity_pct": 80, "plant_status": "SIMULATED: Wet", "predicted_moisture_pct": 75},
+  {"scenario": "missing-readings", "node_id": "$NODE_ID", "soil_index_pct": null, "temperature_c": 27.0, "air_humidity_pct": null, "plant_status": "SIMULATED: Missing soil/humidity", "predicted_moisture_pct": null}
+]

@@ -106,14 +106,18 @@ Uploads all supplied fields in one HTTP batch. `None` omits a field; it does not
 clear its dashboard value. An empty snapshot makes no request. `0`, `False`,
 and an empty string are supplied values, not omissions.
 
-| Parameter | Unit/type | Pin | Validation/conversion |
-| --- | --- | --- | --- |
-| `soil_index_pct` | Percentage | V0 | 0–100; rounded to integer, halves upward. |
-| `temperature_c` | Celsius | V1 | Finite number; sent as a float. |
-| `air_humidity_pct` | Percentage | V6 | 0–100; rounded to integer, halves upward. |
-| `plant_status` | String | V2 | Caller supplies assessment text. |
-| `predicted_moisture_pct` | Percentage | V5 | 0–100; rounded to integer, halves upward. |
-| `pump_is_on` | Boolean | V4 | Physically confirmed state; converted to `0`/`1`. |
+| Python parameter | Blynk datastream name | Unit/type | Pin | Validation/conversion |
+| --- | --- | --- | --- | --- |
+| `soil_index_pct` | `soil_moisture` | Percentage | V0 | 0–100; rounded to integer, halves upward. |
+| `temperature_c` | `weather_temp` | Celsius | V1 | Finite number; sent as a float. |
+| `air_humidity_pct` | `weather_humidity` | Percentage | V6 | 0–100; rounded to integer, halves upward. |
+| `plant_status` | `plant_status` | String | V2 | Caller supplies assessment text. |
+| `predicted_moisture_pct` | `predicted_moisture` | Percentage | V5 | 0–100; rounded to integer, halves upward. |
+| `pump_is_on` | `pump_status` | Boolean | V4 | Physically confirmed state; converted to `0`/`1`. |
+
+Python parameters retain the Edge data contract. Blynk names match the current
+BTL template; HTTPS uploads use virtual pins. V3 commands arrive on
+`downlink/ds/pump_command`, using the exact Blynk name.
 
 Booleans are rejected as measurements. NaN, infinity, and out-of-range
 percentages are rejected before sending. Blynk-specific dashboard limits can

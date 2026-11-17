@@ -1,6 +1,6 @@
 # Blynk irrigation requests → Edge flag
 
-The same-process launcher now consumes Blynk V3 (`Pump Command`) requests and
+The same-process launcher now consumes Blynk V3 (`pump_command`) requests and
 calls the existing AI proxy functions:
 
 | Request | Edge function |
@@ -10,7 +10,7 @@ calls the existing AI proxy functions:
 
 Those functions currently save `irrigation_status` in the Edge operation log.
 **Saved intent is not physical pump state.** This integration sends no direct
-pump actuation commands and never writes V4 (`Pump Status`) or V15 (profile
+pump actuation commands and never writes V4 (`pump_status`) or V15 (profile
 status). It adds no datastream. Existing hardware-confirmed V4 reporting remains
 available separately through `CloudClient.report_pump_status()`.
 

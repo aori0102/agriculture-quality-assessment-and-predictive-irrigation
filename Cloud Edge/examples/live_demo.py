@@ -30,7 +30,7 @@ def main() -> int:
         was_ready = False
         while monotonic() < deadline:
             if client.commands_ready and not was_ready:
-                print("Command subscription ready. Toggle Pump Command (V3) in Blynk.")
+                print("Command subscription ready. Toggle pump_command (V3) in Blynk.")
             was_ready = client.commands_ready
             error = client.last_command_error
             if error is not None and str(error) != last_error:
