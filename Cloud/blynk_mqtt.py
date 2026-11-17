@@ -2,6 +2,7 @@
 
 import ssl
 from threading import Lock
+from typing import TYPE_CHECKING
 
 import paho.mqtt.client as mqtt
 
@@ -10,11 +11,16 @@ from .config import CloudConfig
 from .datastreams import BlynkTopics
 from .errors import CloudError
 
+if TYPE_CHECKING:
+    from .profile_sync import ProfileSync
+
 
 class BlynkMQTT:
-    def __init__(self, config: CloudConfig, *, node_id: str):
+    def __init__(self, config: CloudConfig, *, node_id: str,
+                 profile_sync: "ProfileSync | None" = None):
         self._config = config
         self._node_id = node_id
+        self._profiles = profile_sync
         self._lock = Lock()
         # Joining the network thread must never hold the callback-state lock.
         self._lifecycle_lock = Lock()
@@ -88,6 +94,8 @@ class BlynkMQTT:
                 self._ready = False
                 self._pending = None
                 self._subscription_mid = None
+                if self._profiles is not None:
+                    self._profiles.disconnected()
             try:
                 self._client.disconnect()
             finally:
@@ -102,6 +110,8 @@ class BlynkMQTT:
             self._pending = None
             self._subscription_mid = None
             self._error = CloudError(message, category=category)
+            if self._profiles is not None:
+                self._profiles.disconnected()
         self._client.disconnect()
         # Paho permits loop_stop in its own thread (it sets the stop flag without joining).
         self._client.loop_stop()
@@ -112,6 +122,8 @@ class BlynkMQTT:
             self._ready = False
             self._pending = None
             self._subscription_mid = None
+            if self._profiles is not None:
+                self._profiles.disconnected()
         if inactive:
             client.disconnect()
             return
@@ -126,7 +138,14 @@ class BlynkMQTT:
         with self._lock:
             if self._closed or self._terminal:
                 return
-            result, mid = client.subscribe(BlynkTopics.PUMP_COMMAND, qos=1)
+            if self._profiles is None:
+                result, mid = client.subscribe(BlynkTopics.PUMP_COMMAND, qos=1)
+            else:
+                result, mid = client.subscribe([
+                    (BlynkTopics.PUMP_COMMAND, 1),
+                    (BlynkTopics.APPLY_PROFILE, 1),
+                    (BlynkTopics.PROFILE_PRESET, 1),
+                ])
             self._subscription_mid = mid
         if result != mqtt.MQTT_ERR_SUCCESS:
             self._fail("Could not subscribe to Blynk pump commands.", "subscription")
@@ -136,16 +155,21 @@ class BlynkMQTT:
             if not self._closed and not self._terminal:
                 self._ready = False
                 self._pending = None
+                if self._profiles is not None:
+                    self._profiles.disconnected()
                 self._error = CloudError("Blynk MQTT connection failed; retrying.", category="network")
 
     def _on_subscribe(self, client, userdata, mid, reason_codes, properties) -> None:
         with self._lock:
             if self._closed or self._terminal or mid != self._subscription_mid:
                 return
-            accepted = len(reason_codes) == 1 and not reason_codes[0].is_failure
+            expected = 1 if self._profiles is None else 3
+            accepted = len(reason_codes) == expected and not any(code.is_failure for code in reason_codes)
             if accepted:
                 self._ready = True
                 self._error = None
+                if self._profiles is not None:
+                    self._profiles.connected()
         if not accepted:
             self._fail("Blynk rejected the pump command subscription; check device permissions.", "subscription")
 
@@ -154,6 +178,8 @@ class BlynkMQTT:
             self._ready = False
             self._pending = None
             self._subscription_mid = None
+            if self._profiles is not None:
+                self._profiles.disconnected()
             if not self._closed and not self._terminal:
                 self._error = CloudError("Blynk MQTT disconnected; reconnecting.", category="network")
 
@@ -164,7 +190,12 @@ class BlynkMQTT:
                 "redirect",
             )
             return
-        if message.topic != BlynkTopics.PUMP_COMMAND or message.retain:
+        profile_topic = self._profiles is not None and message.topic in (
+            BlynkTopics.APPLY_PROFILE, BlynkTopics.PROFILE_PRESET,
+        )
+        if (message.topic != BlynkTopics.PUMP_COMMAND and not profile_topic) or message.retain:
+            return
+        if profile_topic and len(message.payload) > 32:
             return
         try:
             value = message.payload.decode("utf-8").strip()
@@ -174,6 +205,9 @@ class BlynkMQTT:
             return
         with self._lock:
             if self._ready and not self._closed and not self._terminal:
-                self._pending = PumpCommand._received(
-                    self._node_id, value == "1", self._config.command_lifetime,
-                )
+                if profile_topic:
+                    self._profiles.receive(message.topic, value)
+                else:
+                    self._pending = PumpCommand._received(
+                        self._node_id, value == "1", self._config.command_lifetime,
+                    )

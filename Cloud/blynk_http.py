@@ -6,7 +6,7 @@ from threading import Lock
 import requests
 
 from .config import CloudConfig
-from .datastreams import BlynkPins
+from .datastreams import BlynkPins, PROFILE_FIELDS
 from .errors import CloudError
 
 
@@ -62,28 +62,71 @@ class BlynkHTTP:
                 params[BlynkPins.PUMP_STATUS] = int(pump_is_on)
             if not params:
                 return
-            params["token"] = self._config.auth_token
-            try:
-                with self._session.get(
-                    f"https://{self._config.server}/external/api/batch/update",
-                    params=params, timeout=self._config.http_timeout,
-                    verify=True, allow_redirects=False,
-                ) as response:
-                    status = response.status_code
-                    if 300 <= status < 400:
-                        raise CloudError(
-                            "Blynk redirected the request; set BLYNK_SERVER to the device's regional host.",
-                            category="redirect", status_code=status,
-                        )
-                    if not 200 <= status < 300:
-                        raise CloudError(
-                            f"Blynk returned HTTP {status}; check credentials, datastreams, and quota.",
-                            category="http", status_code=status,
-                        )
-            except requests.Timeout:
-                raise CloudError("Blynk HTTP request timed out.", category="timeout") from None
-            except requests.RequestException:
-                raise CloudError("Blynk HTTP connection failed.", category="network") from None
+            self._request("batch/update", params)
+
+    def read_profile_snapshot(self) -> dict:
+        """Fetch all editable profile streams in one HTTPS request."""
+        with self._lock:
+            params = dict.fromkeys((*PROFILE_FIELDS, BlynkPins.PROFILE_PRESET), "")
+            return self._request("get", params, read_json=True)
+
+    def write_profile(self, values: dict) -> None:
+        """Write only profile fields/status; Apply may only be reset to zero."""
+        allowed = set(PROFILE_FIELDS) | {
+            BlynkPins.APPLY_PROFILE, BlynkPins.PROFILE_STATUS, BlynkPins.PROFILE_PRESET,
+        }
+        if not isinstance(values, dict) or not values.keys() <= allowed:
+            raise ValueError("Only profile datastream writes are permitted.")
+        for pin, value in values.items():
+            if pin in (BlynkPins.APPLY_PROFILE, BlynkPins.PROFILE_PRESET):
+                choices = (0,) if pin == BlynkPins.APPLY_PROFILE else (0, 1)
+                if type(value) is not int or value not in choices:
+                    raise ValueError("Invalid profile control value.")
+            elif pin in (BlynkPins.NODE_ID, BlynkPins.NODE_DESCRIPTION,
+                         BlynkPins.PLANT_NAME, BlynkPins.PROFILE_STATUS):
+                limit = 512 if pin == BlynkPins.PROFILE_STATUS else 128
+                if not isinstance(value, str) or len(value) > limit or any(not c.isprintable() for c in value):
+                    raise ValueError("Invalid profile text value.")
+            elif type(value) not in (int, float) or not 0 <= value <= 1:
+                raise ValueError("Profile thresholds must be finite numbers between 0 and 1.")
+        with self._lock:
+            self._request("batch/update", dict(values))
+
+    def _request(self, path: str, params: dict, *, read_json: bool = False):
+        # Caller holds the session lock. Never include URLs or response bodies
+        # in errors: Blynk credentials travel in query parameters.
+        if self._closed:
+            raise CloudError("Cloud HTTP client is closed.", category="closed")
+        params["token"] = self._config.auth_token
+        try:
+            with self._session.get(
+                f"https://{self._config.server}/external/api/{path}",
+                params=params, timeout=self._config.http_timeout,
+                verify=True, allow_redirects=False,
+            ) as response:
+                status = response.status_code
+                if 300 <= status < 400:
+                    raise CloudError(
+                        "Blynk redirected the request; set BLYNK_SERVER to the device's regional host.",
+                        category="redirect", status_code=status,
+                    )
+                if not 200 <= status < 300:
+                    raise CloudError(
+                        f"Blynk returned HTTP {status}; check credentials, datastreams, and quota.",
+                        category="http", status_code=status,
+                    )
+                if read_json:
+                    try:
+                        data = response.json()
+                    except ValueError:
+                        raise CloudError("Invalid Blynk profile response.", category="response") from None
+                    if not isinstance(data, dict) or "error" in data:
+                        raise CloudError("Invalid Blynk profile response.", category="response")
+                    return data
+        except requests.Timeout:
+            raise CloudError("Blynk HTTP request timed out.", category="timeout") from None
+        except requests.RequestException:
+            raise CloudError("Blynk HTTP connection failed.", category="network") from None
 
     def close(self) -> None:
         with self._lock:

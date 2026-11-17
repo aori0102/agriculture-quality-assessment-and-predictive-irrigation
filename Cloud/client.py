@@ -7,6 +7,8 @@ from .blynk_mqtt import BlynkMQTT
 from .commands import PumpCommand
 from .config import CloudConfig
 from .errors import CloudError
+from .profiles import ProfileBackend
+from .profile_sync import ProfileSync
 
 
 class CloudClient:
@@ -15,6 +17,8 @@ class CloudClient:
     Args:
         config: Validated Blynk credentials and transport settings.
         node_id: Nonempty edge node identifier, matched exactly on every upload.
+        profile_backend: Optional Edge-owned profile persistence/activation
+            backend. Enables a serial worker and profile subscriptions on start.
 
     Raises:
         ValueError: If node_id is not a nonempty string.
@@ -23,12 +27,21 @@ class CloudClient:
     reception and close() in a finally block. See Cloud/API.md for examples.
     """
 
-    def __init__(self, config: CloudConfig, *, node_id: str):
+    def __init__(self, config: CloudConfig, *, node_id: str,
+                 profile_backend: ProfileBackend | None = None):
         if not isinstance(node_id, str) or not node_id.strip():
             raise ValueError("node_id must be a nonempty string.")
+        if profile_backend is not None:
+            if len(node_id) > 128 or not node_id.isprintable():
+                raise ValueError("Profile node_id must be printable text of at most 128 characters.")
+            if not all(callable(getattr(profile_backend, method, None))
+                       for method in ("get_active", "apply_profile")):
+                raise ValueError("profile_backend must implement get_active and apply_profile.")
         self._node_id = node_id
-        self._mqtt = BlynkMQTT(config, node_id=node_id)
         self._http = BlynkHTTP(config)
+        self._profiles = (ProfileSync(self._http, profile_backend, node_id=node_id)
+                          if profile_backend is not None else None)
+        self._mqtt = BlynkMQTT(config, node_id=node_id, profile_sync=self._profiles)
         self._lock = Lock()
         self._closed = False
 
@@ -42,6 +55,21 @@ class CloudClient:
         """Latest MQTT failure, cleared on successful subscription; not HTTP status."""
         return self._mqtt.last_command_error
 
+    @property
+    def profiles_ready(self) -> bool:
+        """True after subscription and successful restoration of Edge state."""
+        return self._profiles.ready if self._profiles is not None else False
+
+    @property
+    def last_profile_status(self) -> str:
+        """Latest local outcome, even when dashboard delivery failed."""
+        return self._profiles.last_status if self._profiles is not None else ""
+
+    @property
+    def last_profile_error(self) -> CloudError | None:
+        """Latest profile transport error; inspect last_command_error for MQTT."""
+        return self._profiles.last_error if self._profiles is not None else None
+
     def start(self) -> None:
         """Start background MQTT reception and return None without waiting.
 
@@ -51,6 +79,8 @@ class CloudClient:
         """
         with self._lock:
             self._ensure_open()
+            if self._profiles is not None:
+                self._profiles.start()
             self._mqtt.start()
 
     def send_snapshot(
@@ -142,7 +172,7 @@ class CloudClient:
         return self._mqtt.poll_command()
 
     def close(self) -> None:
-        """Release resources; any in-flight synchronous upload finishes first."""
+        """Release resources after in-flight uploads and bounded backend calls."""
         with self._lock:
             if self._closed:
                 return
@@ -150,7 +180,11 @@ class CloudClient:
             try:
                 self._mqtt.close()
             finally:
-                self._http.close()
+                try:
+                    if self._profiles is not None:
+                        self._profiles.close()
+                finally:
+                    self._http.close()
 
     def _ensure_open(self) -> None:
         if self._closed:
