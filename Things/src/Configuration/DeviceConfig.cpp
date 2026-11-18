@@ -30,16 +30,6 @@ bool DeviceConfigManager::load() {
         Config::WIFI_PASSWORD
     );
 
-    m_config.siteId = preferences.getString(
-        "site_id",
-        Config::SITE_ID
-    );
-
-    m_config.zoneId = preferences.getString(
-        "zone_id",
-        Config::ZONE_ID
-    );
-
     m_config.edgeId = preferences.getString(
         "edge_id",
         Config::EDGE_ID
@@ -88,8 +78,6 @@ bool DeviceConfigManager::save(const DeviceConfig& config) {
     preferences.putString("wifi_ssid", config.wifiSSID);
     preferences.putString("wifi_pass", config.wifiPassword);
 
-    preferences.putString("site_id", config.siteId);
-    preferences.putString("zone_id", config.zoneId);
     preferences.putString("edge_id", config.edgeId);
 
     preferences.putString("mqtt_host", config.mqttHost);

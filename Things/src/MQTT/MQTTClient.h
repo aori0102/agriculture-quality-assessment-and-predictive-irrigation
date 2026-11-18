@@ -1,3 +1,4 @@
+
 #pragma once
 
 #include <Arduino.h>
@@ -8,6 +9,7 @@ class MQTTClient {
 private:
     espMqttClient m_client;
 
+    String m_edgeId;
     String m_host;
     String m_username;
     String m_password;
@@ -25,14 +27,21 @@ private:
     uint16_t m_port = 1883;
 
     uint32_t m_lastReconnectAttempt = 0;
+
     static constexpr uint32_t RECONNECT_INTERVAL = 5000;
 
     static constexpr size_t MAX_COMMAND_SIZE = 1024;
+
+    static constexpr uint32_t MAX_PUMP_DURATION_MS = 60000;
 
     bool m_started = false;
 
     // Called when a valid capture command is received.
     std::function<void()> m_captureCommandCallback;
+
+    // Called when a valid start_pump command is received.
+    // Returns true if the pump starts successfully.
+    std::function<bool(uint32_t)> m_pumpCommandCallback;
 
     void connect();
 
@@ -52,9 +61,8 @@ private:
 
 public:
     void begin(
-        const String& siteId,
-        const String& deviceId,
         const String& edgeId,
+        const String& deviceId,
         const String& brokerHost,
         uint16_t brokerPort,
         const String& username,
@@ -65,6 +73,10 @@ public:
 
     void setCaptureCommandCallback(
         std::function<void()> callback
+    );
+
+    void setPumpCommandCallback(
+        std::function<bool(uint32_t)> callback
     );
 
     bool isConnected() const;

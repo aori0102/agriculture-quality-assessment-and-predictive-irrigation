@@ -7,8 +7,7 @@ struct DeviceConfig {
     String wifiSSID;
     String wifiPassword;
 
-    String siteId;
-    String zoneId;
+    // Unique identifier of the Edge device
     String edgeId;
 
     String mqttHost;
