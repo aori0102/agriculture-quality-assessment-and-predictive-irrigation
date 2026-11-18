@@ -32,7 +32,7 @@ class IrrigationHandler:
         self.max_irrigation_duration = self.irrigation_sampling_duration[-1]
         self.irrigation_sampling_duration = self.irrigation_sampling_duration[:-1]
                 
-        model_path = Path(__file__).with_name(cfg.get("model", "model_path"))
+        model_path = cfg_path.parent / cfg.get("model", "model_path")
         self.model = joblib.load(model_path)
             
         
@@ -60,7 +60,6 @@ class IrrigationHandler:
         }])
 
         model_features = self.model.feature_names_in_
-        print(self.model.predict(sample[model_features])[0])
         return self.model.predict(sample[model_features])[0]
 
 

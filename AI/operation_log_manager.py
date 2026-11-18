@@ -1,4 +1,6 @@
 import json
+from copy import deepcopy
+from tempfile import NamedTemporaryFile
 from pathlib import Path
 from configparser import ConfigParser
 from node_profile import NodeProfile
@@ -13,6 +15,20 @@ LOG_STRUCTURE = {
     },
     "node_profile": {}
 }
+
+def atomic_write_text(path: Path, text: str) -> None:
+    """Replace a config or log without exposing a partially written file."""
+    temporary = None
+    try:
+        with NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                delete=False) as file:
+            temporary = Path(file.name)
+            file.write(text)
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
 
 class OperationLogManager:
     def __init__(self):
@@ -40,16 +56,15 @@ class OperationLogManager:
                 log = json.load(file)
             if self.verify_log_integrity(log):
                 return log
-        return LOG_STRUCTURE.copy()
+        return deepcopy(LOG_STRUCTURE)
     
 
     def save_log(self, log: dict):
         if not self.verify_log_integrity(log):
             raise ValueError("Log structure is invalid.")
-        with open(self.log_file_path, 'w', encoding='utf-8') as file:
-            json.dump(log, file, indent=4)
-            
-            
+        atomic_write_text(self.log_file_path, json.dumps(log, indent=4))
+
+
     def log_node(self, node_id: str):
         log = self.load_log()
 
@@ -67,22 +82,36 @@ class OperationLogManager:
         self.save_log(log)
 
 
-    def log_model_training(self):
+    def get_model_status(self) -> dict:
+        return self.load_log()["model_status"]
+
+    def initialize_retrain_period(self, period: str) -> None:
         log = self.load_log()
-        log['model_status']['new_model_pending'] = True
+        log["model_status"]["last_retrain_period"] = period
         self.save_log(log)
 
-
-    def log_model_ready(self, model_path: str):
+    def log_model_training(self, period: str) -> None:
         log = self.load_log()
-        if not log["model_status"]["new_model_pending"]:
-            raise ValueError("No model training is pending. Cannot mark as ready.")
-        log['model_status']['new_model_pending'] = False
-        log['model_status']['new_model_ready'] = True
-        log['model_status']['new_model_path'] = model_path
+        log["model_status"].update(new_model_pending=True, new_model_ready=False,
+                                   new_model_path="", last_retrain_period=period)
         self.save_log(log)
-        
-        
+
+    def log_model_ready(self, model_path: str) -> None:
+        log = self.load_log()
+        status = log["model_status"]
+        if not status["new_model_pending"]:
+            raise ValueError("No model training is pending.")
+        status.update(new_model_pending=False, new_model_ready=True, new_model_path=model_path)
+        self.save_log(log)
+
+    def clear_model_status(self, *, retry: bool = False) -> None:
+        log = self.load_log()
+        status = log["model_status"]
+        status.update(new_model_pending=False, new_model_ready=False, new_model_path="")
+        if retry:
+            status.pop("last_retrain_period", None)
+        self.save_log(log)
+
     def calculate_madp(self, pwp: float, mad: float, fc: float) -> float:
         """
         Calculate the Management Allowed Depletion Point (MADP) based on the provided parameters.
