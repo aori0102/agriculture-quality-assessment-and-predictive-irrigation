@@ -24,11 +24,9 @@ class IrrigationHandler:
             
         self.current_unsampled_nodes = set([])
         self.current_sample_slot = None
-        self.has_handled_this_timestamp = False
         self.last_handling = monotonic()
         
         self.sample_delay_seconds = cfg.getfloat("sampling", "sample_delay_seconds", fallback=1.0)
-        self.sample_timeout_minutes = cfg.getint("sampling", "sample_timeout_minutes", fallback=5)
 
         self.irrigation_sampling_duration = json.loads(cfg.get("irrigation", "irrigation_sampling", fallback="[0.1, 0.5, 1.0, 2.0, 5.0, 8.0]"))
         self.max_irrigation_duration = self.irrigation_sampling_duration[-1]
@@ -100,25 +98,19 @@ class IrrigationHandler:
                 
                 
     def loop(self) -> None:
-        """
-        Main loop for the irrigation handler. Every 10 minutes, the handler attempts to sample
-        all acquired nodes for irrigation prediction. The samples are processed every 1 second,
-        with a 5 minutes timeout. Beyond which, the unsampled nodes are ignored and will have to
-        wait for the next window.
-        The handler only samples nodes that have the correct data for the current timestamp. It
-        will be ignored otherwise.
-        """
+        """Try pending nodes throughout the current window and close older windows."""
         current_time = datetime.now(timezone.utc)
-        irrigation_data_handler.fill_expired_irrigation(current_time)
-        sample_slot = TimeHelper.floor_to_nearest_ten_minutes(current_time)
+        sample_slot = TimeHelper.get_slot(current_time)
         if sample_slot != self.current_sample_slot:
+            closed_slot = self.current_sample_slot
+            if closed_slot is None:
+                closed_slot = TimeHelper.get_slot(sample_slot, offset_windows=-1)
+            irrigation_data_handler.fill_expired_irrigation(
+                current_time,
+                closed_slot=closed_slot,
+                node_ids=set(operation_log_manager.read_all_recorded_nodes()),
+            )
             self.current_sample_slot = sample_slot
-            self.current_unsampled_nodes.clear()
-            self.has_handled_this_timestamp = False
-
-        if TimeHelper.is_window_expired(sample_slot, current_time, self.sample_timeout_minutes):
-            self.current_unsampled_nodes.clear()
-            return
 
         # Check if enough time has passed since the last handling to avoid excessive sampling        
         now = monotonic()
@@ -164,8 +156,6 @@ class IrrigationHandler:
         
         target_sample_time = self.current_sample_slot
         if target_sample_time is None or target_sample_time != TimeHelper.get_current_slot():
-            return False
-        if TimeHelper.is_window_expired(target_sample_time, datetime.now(timezone.utc), self.sample_timeout_minutes):
             return False
         if irrigation_data_handler.has_irrigation_duration(node_id, target_sample_time):
             return True
