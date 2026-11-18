@@ -40,9 +40,9 @@ def send_sample(client, connected: Event, topic_filter: str, node_id: str, loss_
     payload = json.dumps({
         fc.TIMESTAMP: datetime.now().astimezone().isoformat(timespec="seconds"),
         fc.NODE_ID: node_id,
-        fc.SOIL_MOISTURE_PERCENTAGE: round(random.uniform(0, 100), 2),
-        fc.AIR_TEMP_C: round(random.uniform(5, 20), 2),
-        fc.AIR_RELATIVE_HUMIDITY_PERCENTAGE: round(random.uniform(0, 100), 2),
+        fc.SOIL_MOISTURE: round(random.uniform(0, 100), 2),
+        fc.WEATHER_TEMPERATURE: round(random.uniform(5, 20), 2),
+        fc.WEATHER_HUMIDITY: round(random.uniform(0, 100), 2),
         fc.QUALITY: {
             "soil": "valid",
             "dht": "valid"

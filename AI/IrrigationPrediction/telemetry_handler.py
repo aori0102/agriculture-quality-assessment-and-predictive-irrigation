@@ -2,17 +2,31 @@ import json
 import paho.mqtt.client as mqtt
 import csv
 import pandas as pd
-from acquired_node_handler import AcquiredNodeHandler
+from .irrigation_data_handler import irrigation_data_handler
+from operation_log_manager import operation_log_manager
 from . import field_constants as fc
 from time_helper import TimeHelper
 from time import time
 from pathlib import Path
 from configparser import ConfigParser
-from datetime import timezone
+from datetime import timezone, datetime
 
-RAW_TELEMTRY_FIELDS = (fc.SAMPLED_AT, fc.SOIL_MOISTURE_PERCENTAGE, fc.AIR_TEMP_C, fc.AIR_RELATIVE_HUMIDITY_PERCENTAGE, fc.QUALITY)
-SENSORS_FIELDS = [fc.TIMESTAMP, fc.NODE_ID, fc.SOIL_MOISTURE_PERCENTAGE, fc.AIR_TEMP_C, fc.AIR_RELATIVE_HUMIDITY_PERCENTAGE]
-IRRIGATION_FIELDS = [fc.TIMESTAMP, fc.NODE_ID, fc.IRRIGATION_10M]
+RAW_TELEMTRY_FIELDS = (
+    fc.SAMPLED_AT,
+    fc.SOIL_INDEX_PCT,
+    fc.TEMPERATURE_C,
+    fc.AIR_HUMIDITY_PCT,
+    fc.QUALITY
+)
+SENSORS_FIELDS = [
+    fc.TIMESTAMP,
+    fc.NODE_ID,
+    fc.SOIL_MOISTURE,
+    fc.WEATHER_TEMPERATURE,
+    fc.WEATHER_HUMIDITY
+]
+IRRIGATION_FIELDS = [fc.TIMESTAMP, fc.NODE_ID, fc.IRRIGATION_PAST_10M]
+
 
 class TelemetryHandler:
     def __init__(self):
@@ -90,14 +104,14 @@ class TelemetryHandler:
 
         latest_sensor = sensor_data.iloc[-1]
         previous_sensor = sensor_data.iloc[-2]
-        soil_moisture_pct = latest_sensor[fc.SOIL_MOISTURE_PERCENTAGE]
+        soil_moisture_pct = latest_sensor[fc.SOIL_MOISTURE]
         return {
-            fc.TIMESTAMP: latest_sensor[fc.TIMESTAMP],
-            fc.SOIL_MOISTURE_PERCENTAGE: soil_moisture_pct,
-            fc.SOIL_CHANGE_10M: soil_moisture_pct - previous_sensor[fc.SOIL_MOISTURE_PERCENTAGE],
-            fc.AIR_TEMP_C: latest_sensor[fc.AIR_TEMP_C],
-            fc.AIR_RELATIVE_HUMIDITY_PERCENTAGE: latest_sensor[fc.AIR_RELATIVE_HUMIDITY_PERCENTAGE],
-            fc.IRRIGATION_10M: irrigation_data.iloc[-1][fc.IRRIGATION_10M] if not irrigation_data.empty else 0.0,
+            fc.TIMESTAMP: TimeHelper.format_time(latest_sensor[fc.TIMESTAMP]),
+            fc.SOIL_MOISTURE: soil_moisture_pct,
+            fc.SOIL_CHANGE_10M: soil_moisture_pct - previous_sensor[fc.SOIL_MOISTURE],
+            fc.WEATHER_TEMPERATURE: latest_sensor[fc.WEATHER_TEMPERATURE],
+            fc.WEATHER_HUMIDITY: latest_sensor[fc.WEATHER_HUMIDITY],
+            fc.IRRIGATION_PAST_10M: irrigation_data.iloc[-1][fc.IRRIGATION_PAST_10M] if not irrigation_data.empty else 0.0,
             fc.NODE_ID: latest_sensor[fc.NODE_ID],
         }
         
@@ -146,7 +160,7 @@ class TelemetryHandler:
             return False
     
         # Process data
-        timestamp = TimeHelper.process_time(raw_timestamp)
+        timestamp = TimeHelper.process_time(raw_timestamp, require_timezone=True)
         if not timestamp:
             print(f"Invalid timestamp format on {message.topic}: {raw_timestamp}")
             return False
@@ -171,6 +185,9 @@ class TelemetryHandler:
             print(f"Invalid air relative humidity percentage on {message.topic}: {humidity_pct}")
             return False
         
+        if not irrigation_data_handler.log_data(timestamp=timestamp, node_id=node_id, soil_moisture=soil_moisture_pct, weather_temperature=air_temp_c, weather_humidity=humidity_pct):
+            return False  # The window is sealed; do not append sensor history either.
+        
         # Record data into CSV
         needs_header = not self.sensors_path.exists() or self.sensors_path.stat().st_size == 0
         with self.sensors_path.open("a", newline="", encoding="utf-8") as file:
@@ -178,18 +195,18 @@ class TelemetryHandler:
             if needs_header:
                 writer.writeheader()
             writer.writerow({
-                fc.TIMESTAMP: timestamp.isoformat(timespec="seconds"),
+                fc.TIMESTAMP: TimeHelper.format_time(timestamp),
                 fc.NODE_ID: node_id,
-                fc.SOIL_MOISTURE_PERCENTAGE: soil_moisture_pct,
-                fc.AIR_TEMP_C: air_temp_c,
-                fc.AIR_RELATIVE_HUMIDITY_PERCENTAGE: humidity_pct
+                fc.SOIL_MOISTURE: soil_moisture_pct,
+                fc.WEATHER_TEMPERATURE: air_temp_c,
+                fc.WEATHER_HUMIDITY: humidity_pct
             })
             
-        AcquiredNodeHandler.record_acquired_node(node_id)  # Record the node ID as acquired
+        operation_log_manager.log_node(node_id)  # Record the node ID as acquired
         return True
     
 
-    def record_irrigation_data(self, irrigation_value: float, node_id: str) -> None:
+    def record_irrigation_data(self, irrigation_value: float, node_id: str, timestamp: datetime) -> bool:
         """
         Record the irrigation data into the irrigation history CSV file with the
         corresponding node ID.
@@ -197,16 +214,8 @@ class TelemetryHandler:
         Args:
             irrigation_value (float): The amount of irrigation applied for the next 10 minutes.
             node_id (str): The ID of the node for which the irrigation data is recorded.
+            timestamp (datetime): The timestamp of the irrigation data.
         """
-        needs_header = not self.irrigation_path.exists() or self.irrigation_path.stat().st_size == 0
-        with self.irrigation_path.open("a", newline="", encoding="utf-8") as file:
-            writer = csv.DictWriter(file, fieldnames=IRRIGATION_FIELDS)
-            if needs_header:
-                writer.writeheader()
-            writer.writerow({
-                fc.TIMESTAMP: TimeHelper.get_current_timestamp_floor(),
-                fc.NODE_ID: node_id,
-                fc.IRRIGATION_10M: irrigation_value
-            })
+        return irrigation_data_handler.log_data(timestamp=timestamp, node_id=node_id, irrigation_duration=irrigation_value)
             
 telemetry_handler = TelemetryHandler()

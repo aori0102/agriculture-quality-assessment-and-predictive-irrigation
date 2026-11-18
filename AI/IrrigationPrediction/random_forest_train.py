@@ -5,6 +5,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import joblib
 import pandas as pd
+import field_constants as fc
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import mean_absolute_error
@@ -15,19 +16,19 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 DATA_DIR = SCRIPT_DIR / "datasets"
 
 BASE_FEATURES = [
-    "soil_moisture",
-    "weather_temp",
-    "weather_humidity",
-    "irrigation_past_10m",
-    "irrigation_next_10m",
+    fc.SOIL_MOISTURE,
+    fc.WEATHER_TEMPERATURE,
+    fc.WEATHER_HUMIDITY,
+    fc.IRRIGATION_PAST_10M,
+    fc.IRRIGATION_DURATION_MINUTES,
 ]
-DELTA_FEATURE = "soil_delta_10m"
+DELTA_FEATURE = fc.SOIL_CHANGE_10M
 TARGET = "y"
 
 
 def save_prediction_scatter(test, predictions, output_path):
     actual = test[TARGET].to_numpy()
-    irrigated = test["irrigation_next_10m"].gt(0).to_numpy()
+    irrigated = test[fc.IRRIGATION_DURATION_MINUTES].gt(0).to_numpy()
 
     fig, ax = plt.subplots(figsize=(7, 7), layout="constrained")
 
@@ -93,7 +94,7 @@ def load_data(path: Path, features: list[str]) -> pd.DataFrame:
 
 def report_test_results(test: pd.DataFrame, predictions) -> None:
     test = test.assign(prediction=predictions)
-    irrigated = test["irrigation_next_10m"].gt(0)
+    irrigated = test[fc.IRRIGATION_DURATION_MINUTES].gt(0)
 
     groups = [
         ("All test rows", test),
@@ -108,7 +109,7 @@ def report_test_results(test: pd.DataFrame, predictions) -> None:
 
         mae = mean_absolute_error(rows[TARGET], rows["prediction"])
         persistence_mae = mean_absolute_error(
-            rows[TARGET], rows["soil_moisture"]
+            rows[TARGET], rows[fc.SOIL_MOISTURE]
         )
         print(
             f"{name} ({len(rows):,} rows): "

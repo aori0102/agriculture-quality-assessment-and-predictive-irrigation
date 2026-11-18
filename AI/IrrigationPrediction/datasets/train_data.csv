@@ -1,4 +1,4 @@
-ts,weather_temp,weather_humidity,soil_moisture,irrigation_next_10m,sector,irrigation_past_10m,y,soil_delta_10m
+timestamp,weather_temp,weather_humidity,soil_moisture,irrigation_duration_minutes,sector,irrigation_past_10m,y,soil_delta_10m
 2025-02-10 13:50:00,13.581666666666667,50.0,0.0,0,2,0.0,0.0,
 2025-02-10 13:50:00,13.581666666666667,50.0,0.0,0,3,0.0,0.0,
 2025-02-14 12:10:00,15.344999999999999,73.03333333333333,84.0,0,0,0.0,75.0,
