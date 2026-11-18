@@ -1,7 +1,6 @@
 import pandas as pd
 from pathlib import Path
 from datetime import datetime, timezone
-from configparser import ConfigParser
 from threading import RLock
 from functools import wraps
 import os
@@ -31,12 +30,8 @@ def synchronized(method):
 class IrrigationDataHandler:
     def __init__(self):
         self._lock = RLock()
-        cfg = ConfigParser()
-        cfg.read(Path(__file__).with_name("config.cfg"), encoding="utf-8-sig")
-        self.sample_timeout_minutes = cfg.getfloat("sampling", "sample_timeout_minutes", fallback=5)
         self.last_fetch_error: str | None = None
         self.initialize_log()
-        self.fill_expired_irrigation()
             
 
     def initialize_log(self):
@@ -77,9 +72,15 @@ class IrrigationDataHandler:
         return any(not self._is_empty(value) for value in rows[fc.IRRIGATION_DURATION_MINUTES])
 
     @synchronized
-    def fill_expired_irrigation(self, now: datetime | str = None) -> int:
-        """Close blank historical/expired durations; never replace recorded values."""
+    def fill_expired_irrigation(
+        self, now: datetime | str = None, *,
+        closed_slot: datetime | None = None, node_ids: set[str] | None = None,
+    ) -> int:
+        """Close older rows and register known nodes missing from the window just closed."""
         now = now if now is not None else datetime.now(timezone.utc)
+        current_slot = TimeHelper.get_slot(now)
+        if current_slot is None:
+            raise ValueError("Invalid time for closing irrigation windows")
         times = self.data_frame[fc.TIMESTAMP].map(TimeHelper.get_slot)
         count = 0
         for index, row in self.data_frame.iterrows():
@@ -88,7 +89,7 @@ class IrrigationDataHandler:
             slot = times.loc[index]
             if TimeHelper.get_slot(slot) is None:
                 raise ValueError(f"Invalid timestamp in irrigation log row {index}")
-            if not TimeHelper.is_window_expired(slot, now, self.sample_timeout_minutes):
+            if slot >= current_slot:
                 continue
             # Preserve an existing decision if legacy duplicate rows share a window.
             same_window = (self.data_frame[fc.NODE_ID] == row[fc.NODE_ID]) & (times == slot)
@@ -96,6 +97,16 @@ class IrrigationDataHandler:
             values = [value for value in recorded if not self._is_empty(value)]
             self.data_frame.at[index, fc.IRRIGATION_DURATION_MINUTES] = values[0] if values else 0.0
             count += 1
+        if closed_slot is not None and closed_slot < current_slot and node_ids:
+            recorded_nodes = set(self.data_frame.loc[times == closed_slot, fc.NODE_ID])
+            missing_nodes = sorted(node_ids - recorded_nodes)
+            for node_id in missing_nodes:
+                self.data_frame.loc[len(self.data_frame)] = {
+                    fc.TIMESTAMP: TimeHelper.format_time(closed_slot),
+                    fc.NODE_ID: node_id,
+                    fc.IRRIGATION_DURATION_MINUTES: 0.0,
+                }
+            count += len(missing_nodes)
         if count:
             self.save_data()
         return count
@@ -204,7 +215,7 @@ class IrrigationDataHandler:
         existing_values = [value for value in recorded if not self._is_empty(value)]
         if existing_values:
             return False  # Freeze the entire sensor snapshot, including zero-duration decisions.
-        expired = TimeHelper.is_window_expired(slot, datetime.now(timezone.utc), self.sample_timeout_minutes)
+        expired = TimeHelper.is_window_expired(slot, datetime.now(timezone.utc))
         requested_duration = irrigation_duration
         if expired:
             irrigation_duration = 0.0

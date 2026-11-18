@@ -68,10 +68,10 @@ class TimeHelper:
         return datetime.now(timezone.utc).minute
 
     @staticmethod
-    def is_window_expired(raw: datetime | str, now: datetime | str, timeout_minutes: float) -> bool:
-        """Old windows are closed; the current window closes at its timeout."""
+    def is_window_expired(raw: datetime | str, now: datetime | str) -> bool:
+        """A window expires when a later window starts."""
         slot = TimeHelper.get_slot(raw)
         current = TimeHelper.process_time(now)
         if slot is None or current is None:
             raise ValueError("Invalid timestamp when checking window expiry")
-        return slot < TimeHelper.get_slot(current) or (current - slot).total_seconds() >= timeout_minutes * 60
+        return slot < TimeHelper.get_slot(current)

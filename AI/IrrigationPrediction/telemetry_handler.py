@@ -1,14 +1,9 @@
 import json
 import paho.mqtt.client as mqtt
-import csv
-import pandas as pd
 from .irrigation_data_handler import irrigation_data_handler
 from operation_log_manager import operation_log_manager
 from . import field_constants as fc
 from time_helper import TimeHelper
-from time import time
-from pathlib import Path
-from configparser import ConfigParser
 from datetime import timezone, datetime
 
 RAW_TELEMTRY_FIELDS = (
@@ -18,107 +13,12 @@ RAW_TELEMTRY_FIELDS = (
     fc.AIR_HUMIDITY_PCT,
     fc.QUALITY
 )
-SENSORS_FIELDS = [
-    fc.TIMESTAMP,
-    fc.NODE_ID,
-    fc.SOIL_MOISTURE,
-    fc.WEATHER_TEMPERATURE,
-    fc.WEATHER_HUMIDITY
-]
-IRRIGATION_FIELDS = [fc.TIMESTAMP, fc.NODE_ID, fc.IRRIGATION_PAST_10M]
 
 
 class TelemetryHandler:
-    def __init__(self):
-        cfg_path = Path(__file__).with_name("config.cfg")
-        cfg = ConfigParser()
-        with cfg_path.open(encoding="utf-8-sig") as file:
-            cfg.read_file(file)
-
-        self.sensors_path = Path(__file__).with_name(cfg.get("sensors", "sensors_history_path"))
-        try:
-            with self.sensors_path.open("rb") as file:
-                first_line = file.readline().decode("utf-8-sig")
-                header = next(csv.reader([first_line], strict=True), [])
-        except (FileNotFoundError, UnicodeDecodeError, csv.Error):
-            header = []
-
-        if header != SENSORS_FIELDS:
-            with self.sensors_path.open("w", newline="", encoding="utf-8") as file:
-                writer = csv.DictWriter(file, fieldnames=SENSORS_FIELDS)
-                writer.writeheader()
-
-        self.irrigation_path = Path(__file__).with_name(cfg.get("irrigation", "irrigation_history_path"))
-        try:
-            with self.irrigation_path.open("rb") as file:
-                first_line = file.readline().decode("utf-8-sig")
-                header = next(csv.reader([first_line], strict=True), [])
-        except (FileNotFoundError, UnicodeDecodeError, csv.Error):
-            header = []
-            
-        if header != IRRIGATION_FIELDS:
-            with self.irrigation_path.open("w", newline="", encoding="utf-8") as file:
-                writer = csv.DictWriter(file, fieldnames=IRRIGATION_FIELDS)
-                writer.writeheader()
-                
-
-    def get_irrigation_data(self, node_id: str) -> dict[str, str | float] | None:
-        """
-        Get the latest irrigation data of the given node. This includes the latest soil moisture percentage, the change in 
-        soil moisture over the last 10 minutes, the latest air temperature, the latest air relative humidity percentage, and the
-        irrigation amount over the last 10 minutes. If there is any missing data, return None. The irrigation amount will be 0
-        if there is no irrigation data available for the node.
-        
-        Args:
-            node_id (str): The ID of the node to get the irrigation data for.
-            
-        Returns:
-            dict[str, str | float] | None: A dictionary containing the latest irrigation 
-            data for the specified node, or None if the node is not found or if there 
-            is missing data.
-        """
-        if node_id is None:
-            return None
-        
-        # Read data history
-        try:
-            node_id_dtype = {fc.NODE_ID: str}
-            sensor_data_frame = pd.read_csv(self.sensors_path, dtype=node_id_dtype)
-            irrigation_data_frame = pd.read_csv(self.irrigation_path, dtype=node_id_dtype)
-        except pd.errors.EmptyDataError:
-            return None
-        
-        # Filter data for the specified node
-        sensor_data = sensor_data_frame.loc[sensor_data_frame[fc.NODE_ID] == node_id]
-        irrigation_data = irrigation_data_frame.loc[irrigation_data_frame[fc.NODE_ID] == node_id]
-        
-        # CSV rows are appended in arrival order, which can differ from sample order.
-        sample_times = pd.to_datetime(sensor_data[fc.TIMESTAMP], format="mixed", utc=True, errors="coerce")
-        sensor_data = sensor_data.loc[sample_times.dropna().sort_values(kind="stable").index]
-
-        # Check if there is enough data to calculate the change in soil moisture over 
-        # the last 10 minutes along with the delta with the previous reading. If not,
-        # return None.
-        if len(sensor_data) < 2:
-            return None
-
-        latest_sensor = sensor_data.iloc[-1]
-        previous_sensor = sensor_data.iloc[-2]
-        soil_moisture_pct = latest_sensor[fc.SOIL_MOISTURE]
-        return {
-            fc.TIMESTAMP: TimeHelper.format_time(latest_sensor[fc.TIMESTAMP]),
-            fc.SOIL_MOISTURE: soil_moisture_pct,
-            fc.SOIL_CHANGE_10M: soil_moisture_pct - previous_sensor[fc.SOIL_MOISTURE],
-            fc.WEATHER_TEMPERATURE: latest_sensor[fc.WEATHER_TEMPERATURE],
-            fc.WEATHER_HUMIDITY: latest_sensor[fc.WEATHER_HUMIDITY],
-            fc.IRRIGATION_PAST_10M: irrigation_data.iloc[-1][fc.IRRIGATION_PAST_10M] if not irrigation_data.empty else 0.0,
-            fc.NODE_ID: latest_sensor[fc.NODE_ID],
-        }
-        
-    
     def record_sensors_telemetry(self, message: mqtt.MQTTMessage, node_id: str) -> bool:
         """
-        Record the sensor data from the MQTT message payload into the sensors history CSV file
+        Record the sensor data from the MQTT message payload into data_log.csv
         with the corresponding node ID. The message payload should be a JSON object.
         
         Args:
@@ -185,34 +85,25 @@ class TelemetryHandler:
             print(f"Invalid air relative humidity percentage on {message.topic}: {humidity_pct}")
             return False
         
-        if not irrigation_data_handler.log_data(timestamp=timestamp, node_id=node_id, soil_moisture=soil_moisture_pct, weather_temperature=air_temp_c, weather_humidity=humidity_pct):
-            return False  # The window is sealed; do not append sensor history either.
-        
-        # Record data into CSV
-        needs_header = not self.sensors_path.exists() or self.sensors_path.stat().st_size == 0
-        with self.sensors_path.open("a", newline="", encoding="utf-8") as file:
-            writer = csv.DictWriter(file, fieldnames=SENSORS_FIELDS)
-            if needs_header:
-                writer.writeheader()
-            writer.writerow({
-                fc.TIMESTAMP: TimeHelper.format_time(timestamp),
-                fc.NODE_ID: node_id,
-                fc.SOIL_MOISTURE: soil_moisture_pct,
-                fc.WEATHER_TEMPERATURE: air_temp_c,
-                fc.WEATHER_HUMIDITY: humidity_pct
-            })
-            
+        if not irrigation_data_handler.log_data(
+            timestamp=timestamp,
+            node_id=node_id,
+            soil_moisture=soil_moisture_pct,
+            weather_temperature=air_temp_c,
+            weather_humidity=humidity_pct,
+        ):
+            return False
+
         operation_log_manager.log_node(node_id)  # Record the node ID as acquired
         return True
     
 
     def record_irrigation_data(self, irrigation_value: float, node_id: str, timestamp: datetime) -> bool:
         """
-        Record the irrigation data into the irrigation history CSV file with the
-        corresponding node ID.
+        Record the irrigation duration for the node and window in data_log.csv.
         
         Args:
-            irrigation_value (float): The amount of irrigation applied for the next 10 minutes.
+            irrigation_value (float): The irrigation duration in minutes.
             node_id (str): The ID of the node for which the irrigation data is recorded.
             timestamp (datetime): The timestamp of the irrigation data.
         """
