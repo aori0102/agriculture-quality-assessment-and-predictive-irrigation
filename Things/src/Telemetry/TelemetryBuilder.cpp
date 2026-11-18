@@ -4,9 +4,9 @@
 #include <ArduinoJson.h>
 #include <math.h>
 
-TelemetryBuilder::TelemetryBuilder(const String& zoneId) {
-    m_zoneId = zoneId;
-}
+// =====================================================
+// BUILD TELEMETRY DATA
+// =====================================================
 
 TelemetryData TelemetryBuilder::build(
     const SensorData& sensorData,
@@ -15,12 +15,17 @@ TelemetryData TelemetryBuilder::build(
 ) {
     TelemetryData data;
 
+    // ---------------------------------------------
     // Device information
-    data.zoneId = m_zoneId;
+    // ---------------------------------------------
+
     data.nodeId = identity.getNodeId();
     data.sampledAt = sampledAt;
 
+    // ---------------------------------------------
     // Soil moisture
+    // ---------------------------------------------
+
     data.soilValid =
         sensorData.soil.isValid &&
         isfinite(sensorData.soil.moisturePercent) &&
@@ -31,7 +36,10 @@ TelemetryData TelemetryBuilder::build(
         data.soilIndexPct = sensorData.soil.moisturePercent;
     }
 
+    // ---------------------------------------------
     // DHT22
+    // ---------------------------------------------
+
     data.dhtValid =
         sensorData.dht.isValid &&
         isfinite(sensorData.dht.temperature) &&
@@ -47,28 +55,43 @@ TelemetryData TelemetryBuilder::build(
     return data;
 }
 
+// =====================================================
+// CONVERT TELEMETRY TO JSON
+// =====================================================
+
 String TelemetryBuilder::toJson(const TelemetryData& data) {
     JsonDocument doc;
 
+    // ---------------------------------------------
     // Device information
-    doc["zone_id"] = data.zoneId;
+    // ---------------------------------------------
+
     doc["node_id"] = data.nodeId;
 
+    // ---------------------------------------------
     // Timestamp
+    // ---------------------------------------------
+
     if (!data.sampledAt.isEmpty()) {
         doc["sampled_at"] = data.sampledAt;
     } else {
         doc["sampled_at"] = nullptr;
     }
 
+    // ---------------------------------------------
     // Soil moisture
+    // ---------------------------------------------
+
     if (data.soilValid) {
         doc["soil_index_pct"] = data.soilIndexPct;
     } else {
         doc["soil_index_pct"] = nullptr;
     }
 
+    // ---------------------------------------------
     // DHT22
+    // ---------------------------------------------
+
     if (data.dhtValid) {
         doc["temperature_c"] = data.temperatureC;
         doc["air_humidity_pct"] = data.airHumidityPct;
@@ -77,7 +100,10 @@ String TelemetryBuilder::toJson(const TelemetryData& data) {
         doc["air_humidity_pct"] = nullptr;
     }
 
+    // ---------------------------------------------
     // Sensor quality
+    // ---------------------------------------------
+
     JsonObject quality = doc["quality"].to<JsonObject>();
 
     quality["soil"] = data.soilValid ? "valid" : "invalid";

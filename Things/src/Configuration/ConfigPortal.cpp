@@ -1,121 +1,232 @@
 
 #include "ConfigPortal.h"
 
+#include <Arduino.h>
+#include <WiFi.h>
 #include <esp_system.h>
 
-namespace {
-    constexpr char AP_PASSWORD[] = "";
-    constexpr char AP_PREFIX[] = "";
+// =====================================================
+// ACCESS POINT CONFIGURATION
+// =====================================================
+
+// Empty password means the configuration AP is open.
+constexpr char AP_PASSWORD[] = "";
+
+// =====================================================
+// HTML ESCAPE
+// =====================================================
+
+static String escapeHtml(const String& value) {
+    String result;
+
+    result.reserve(value.length());
+
+    for (size_t i = 0; i < value.length(); i++) {
+        switch (value[i]) {
+            case '&':
+                result += "&amp;";
+                break;
+
+            case '<':
+                result += "&lt;";
+                break;
+
+            case '>':
+                result += "&gt;";
+                break;
+
+            case '"':
+                result += "&quot;";
+                break;
+
+            case '\'':
+                result += "&#39;";
+                break;
+
+            default:
+                result += value[i];
+                break;
+        }
+    }
+
+    return result;
 }
+
+// =====================================================
+// BEGIN
+// =====================================================
 
 void ConfigPortal::begin(DeviceConfigManager* configManager) {
+
     m_configManager = configManager;
 
-    pinMode(BUTTON_PIN, INPUT_PULLUP);
-
-    Serial.println("[PORTAL] Button initialized on GPIO25");
+    Serial.println("[PORTAL] Configuration portal initialized!");
 }
 
+// =====================================================
+// LOOP
+// =====================================================
+
 void ConfigPortal::loop() {
-    handleButton();
 
     if (!m_isActive) {
         return;
     }
 
     m_dnsServer.processNextRequest();
+
     m_server.handleClient();
 }
 
+// =====================================================
+// IS ACTIVE
+// =====================================================
+
 bool ConfigPortal::isActive() const {
+
     return m_isActive;
 }
 
-void ConfigPortal::handleButton() {
-    const bool pressed = digitalRead(BUTTON_PIN) == LOW;
-    const uint32_t currentTime = millis();
+// =====================================================
+// OPEN PORTAL
+// =====================================================
 
-    if (pressed && !m_buttonPressed) {
-        m_buttonPressed = true;
-        m_longPressTriggered = false;
-        m_buttonPressTime = currentTime;
+void ConfigPortal::open() {
+
+    if (m_isActive) {
+        Serial.println("[PORTAL] Portal is already active!");
+        return;
     }
 
-    if (!pressed && m_buttonPressed) {
-        m_buttonPressed = false;
-        m_longPressTriggered = false;
+    if (m_configManager == nullptr) {
+        Serial.println("[PORTAL] Config manager is not initialized!");
+        return;
     }
 
-    if (
-        pressed &&
-        m_buttonPressed &&
-        !m_longPressTriggered &&
-        currentTime - m_buttonPressTime >= LONG_PRESS_MS
-    ) {
-        m_longPressTriggered = true;
-
-        Serial.println("[PORTAL] Long press detected!");
-
-        if (!m_isActive) {
-            startPortal();
-        }
-    }
+    startPortal();
 }
 
+// =====================================================
+// START PORTAL
+// =====================================================
+
 void ConfigPortal::startPortal() {
+
     if (m_isActive) {
         return;
     }
 
     Serial.println();
-    Serial.println("========== CONFIGURATION MODE ==========");
+    Serial.println("========== START CONFIGURATION PORTAL ==========");
+
+    // ---------------------------------------------
+    // 1. Configure WiFi mode.
+    // ---------------------------------------------
 
     WiFi.mode(WIFI_AP_STA);
 
-    const uint64_t mac = ESP.getEfuseMac();
+    // ---------------------------------------------
+    // 2. Generate AP SSID.
+    // ---------------------------------------------
 
-    char suffix[5];
+    String nodeId = getNodeId();
 
-    snprintf(
-        suffix,
-        sizeof(suffix),
-        "%04X",
-        static_cast<uint16_t>(mac & 0xFFFF)
-    );
+    String suffix = nodeId;
 
-    String apSSID = String(AP_PREFIX) + suffix;
-
-    if (!WiFi.softAP(apSSID.c_str(), AP_PASSWORD)) {
-        Serial.println("[PORTAL] Failed to start AP!");
-        return;
+    if (suffix.length() > 4) {
+        suffix = suffix.substring(suffix.length() - 4);
     }
 
-    IPAddress apIP = WiFi.softAPIP();
+    String apSSID = "ESP32-Config-" + suffix;
 
     Serial.print("[PORTAL] AP SSID: ");
     Serial.println(apSSID);
 
+    // ---------------------------------------------
+    // 3. Start Access Point.
+    // ---------------------------------------------
+
+    bool apStarted;
+
+    if (strlen(AP_PASSWORD) == 0) {
+        apStarted = WiFi.softAP(apSSID.c_str());
+    }
+    else {
+        apStarted = WiFi.softAP(
+            apSSID.c_str(),
+            AP_PASSWORD
+        );
+    }
+
+    if (!apStarted) {
+        Serial.println("[PORTAL] Failed to start Access Point!");
+
+        WiFi.mode(WIFI_STA);
+
+        return;
+    }
+
+    // ---------------------------------------------
+    // 4. Get AP IP address.
+    // ---------------------------------------------
+
+    IPAddress apIP = WiFi.softAPIP();
+
     Serial.print("[PORTAL] AP IP: ");
     Serial.println(apIP);
 
-    m_dnsServer.start(
+    // ---------------------------------------------
+    // 5. Start captive DNS.
+    // ---------------------------------------------
+
+    if (!m_dnsServer.start(
         DNS_PORT,
         "*",
         apIP
-    );
+    )) {
+        Serial.println("[PORTAL] Failed to start DNS server!");
+
+        WiFi.softAPdisconnect(true);
+        WiFi.mode(WIFI_STA);
+
+        return;
+    }
+
+    Serial.println("[PORTAL] DNS server started!");
+
+    // ---------------------------------------------
+    // 6. Configure HTTP routes.
+    // ---------------------------------------------
 
     configureRoutes();
+
+    // ---------------------------------------------
+    // 7. Start HTTP server.
+    // ---------------------------------------------
 
     m_server.begin();
 
     m_isActive = true;
 
-    Serial.println("[PORTAL] DNS server started!");
     Serial.println("[PORTAL] HTTP server started!");
-    Serial.println("[PORTAL] Configuration mode is ready!");
+
+    Serial.println();
+    Serial.println("[PORTAL] Configuration portal is ready!");
+    Serial.print("[PORTAL] Connect to WiFi: ");
+    Serial.println(apSSID);
+
+    Serial.print("[PORTAL] Open browser: http://");
+    Serial.println(apIP);
+
+    Serial.println("================================================");
 }
 
+// =====================================================
+// STOP PORTAL
+// =====================================================
+
 void ConfigPortal::stopPortal() {
+
     if (!m_isActive) {
         return;
     }
@@ -123,445 +234,680 @@ void ConfigPortal::stopPortal() {
     Serial.println("[PORTAL] Stopping configuration portal...");
 
     m_server.stop();
+
     m_dnsServer.stop();
 
     WiFi.softAPdisconnect(true);
 
     m_isActive = false;
 
-    Serial.println("[PORTAL] AP stopped!");
+    Serial.println("[PORTAL] Configuration portal stopped!");
 }
+
+// =====================================================
+// CONFIGURE HTTP ROUTES
+// =====================================================
 
 void ConfigPortal::configureRoutes() {
-    m_server.on("/", HTTP_GET, [this]() {
-        handleRoot();
-    });
 
-    m_server.on("/save", HTTP_POST, [this]() {
-        handleSave();
-    });
+    // ---------------------------------------------
+    // Main configuration page.
+    // ---------------------------------------------
 
-    // Captive portal detection endpoints.
-    m_server.on("/generate_204", HTTP_GET, [this]() {
-        handleRoot();
-    });
+    m_server.on(
+        "/",
+        HTTP_GET,
+        [this]() {
+            handleRoot();
+        }
+    );
 
-    m_server.on("/hotspot-detect.html", HTTP_GET, [this]() {
-        handleRoot();
-    });
+    // ---------------------------------------------
+    // Save configuration.
+    // ---------------------------------------------
 
-    m_server.on("/connecttest.txt", HTTP_GET, [this]() {
-        handleRoot();
-    });
+    m_server.on(
+        "/save",
+        HTTP_POST,
+        [this]() {
+            handleSave();
+        }
+    );
 
-    m_server.on("/ncsi.txt", HTTP_GET, [this]() {
-        handleRoot();
-    });
+    // ---------------------------------------------
+    // Common captive portal detection paths.
+    // ---------------------------------------------
 
-    m_server.onNotFound([this]() {
-        handleNotFound();
-    });
+    m_server.on(
+        "/generate_204",
+        HTTP_GET,
+        [this]() {
+            handleRoot();
+        }
+    );
+
+    m_server.on(
+        "/hotspot-detect.html",
+        HTTP_GET,
+        [this]() {
+            handleRoot();
+        }
+    );
+
+    m_server.on(
+        "/connecttest.txt",
+        HTTP_GET,
+        [this]() {
+            handleRoot();
+        }
+    );
+
+    m_server.on(
+        "/ncsi.txt",
+        HTTP_GET,
+        [this]() {
+            handleRoot();
+        }
+    );
+
+    // ---------------------------------------------
+    // Unknown routes.
+    // ---------------------------------------------
+
+    m_server.onNotFound(
+        [this]() {
+            handleNotFound();
+        }
+    );
 }
+
+// =====================================================
+// HANDLE ROOT
+// =====================================================
 
 void ConfigPortal::handleRoot() {
+
+    String html = buildHtml();
+
     m_server.send(
         200,
-        "text/html; charset=utf-8",
-        buildHtml()
+        "text/html",
+        html
     );
 }
 
-void ConfigPortal::handleNotFound() {
-    m_server.sendHeader(
-        "Location",
-        String("http://") + WiFi.softAPIP().toString() + "/",
-        true
-    );
-
-    m_server.send(302, "text/plain", "");
-}
+// =====================================================
+// HANDLE SAVE
+// =====================================================
 
 void ConfigPortal::handleSave() {
-    DeviceConfig config = m_configManager->get();
 
-    if (m_server.hasArg("wifi_ssid")) {
-        config.wifiSSID = m_server.arg("wifi_ssid");
-    }
+    Serial.println();
+    Serial.println("[PORTAL] Received configuration update!");
 
-    if (m_server.hasArg("wifi_password")) {
-        config.wifiPassword = m_server.arg("wifi_password");
-    }
+    if (m_configManager == nullptr) {
 
-    if (m_server.hasArg("site_id")) {
-        config.siteId = m_server.arg("site_id");
-    }
-
-    if (m_server.hasArg("zone_id")) {
-        config.zoneId = m_server.arg("zone_id");
-    }
-
-    if (m_server.hasArg("edge_id")) {
-        config.edgeId = m_server.arg("edge_id");
-    }
-
-    if (m_server.hasArg("mqtt_host")) {
-        config.mqttHost = m_server.arg("mqtt_host");
-    }
-
-    if (m_server.hasArg("mqtt_port")) {
-        long port = m_server.arg("mqtt_port").toInt();
-
-        if (port < 1 || port > 65535) {
-            m_server.send(
-                400,
-                "text/plain",
-                "Invalid MQTT port!"
-            );
-            return;
-        }
-
-        config.mqttPort = static_cast<uint16_t>(port);
-    }
-
-    if (m_server.hasArg("mqtt_username")) {
-        config.mqttUsername = m_server.arg("mqtt_username");
-    }
-
-    if (m_server.hasArg("mqtt_password")) {
-        config.mqttPassword = m_server.arg("mqtt_password");
-    }
-
-    if (m_server.hasArg("telemetry_interval")) {
-        uint32_t interval = strtoul(
-            m_server.arg("telemetry_interval").c_str(),
-            nullptr,
-            10
-        );
-
-        if (interval < 1000 || interval > 3600000) {
-            m_server.send(
-                400,
-                "text/plain",
-                "Telemetry interval must be 1000-3600000 ms!"
-            );
-            return;
-        }
-
-        config.telemetryIntervalMs = interval;
-    }
-
-    if (
-        config.wifiSSID.isEmpty() ||
-        config.mqttHost.isEmpty() ||
-        config.siteId.isEmpty() ||
-        config.edgeId.isEmpty()
-    ) {
-        m_server.send(
-            400,
-            "text/plain",
-            "Required fields cannot be empty!"
-        );
-        return;
-    }
-
-    if (!m_configManager->save(config)) {
         m_server.send(
             500,
             "text/plain",
-            "Failed to save configuration!"
+            "Configuration manager is unavailable."
         );
+
         return;
     }
 
+    // ---------------------------------------------
+    // 1. Get current configuration.
+    // ---------------------------------------------
+
+    DeviceConfig updatedConfig = m_configManager->get();
+
+    // ---------------------------------------------
+    // 2. Read submitted form values.
+    // ---------------------------------------------
+
+    String wifiSSID = m_server.arg("wifiSSID");
+    String wifiPassword = m_server.arg("wifiPassword");
+
+    String edgeId = m_server.arg("edgeId");
+
+    String mqttHost = m_server.arg("mqttHost");
+    String mqttPort = m_server.arg("mqttPort");
+
+    String mqttUsername = m_server.arg("mqttUsername");
+    String mqttPassword = m_server.arg("mqttPassword");
+
+    String telemetryInterval = m_server.arg("telemetryIntervalMs");
+
+    // ---------------------------------------------
+    // 3. Validate required fields.
+    // ---------------------------------------------
+
+    wifiSSID.trim();
+    edgeId.trim();
+    mqttHost.trim();
+    mqttUsername.trim();
+
+    if (
+        wifiSSID.isEmpty() ||
+        edgeId.isEmpty() ||
+        mqttHost.isEmpty() ||
+        mqttPort.isEmpty() ||
+        telemetryInterval.isEmpty()
+    ) {
+
+        m_server.send(
+            400,
+            "text/html",
+            "<h2>Invalid configuration</h2>"
+            "<p>Please fill in all required fields.</p>"
+            "<a href='/'>Go back</a>"
+        );
+
+        return;
+    }
+
+    // ---------------------------------------------
+    // 4. Validate MQTT port.
+    // ---------------------------------------------
+
+    long parsedPort = mqttPort.toInt();
+
+    if (parsedPort < 1 || parsedPort > 65535) {
+
+        m_server.send(
+            400,
+            "text/html",
+            "<h2>Invalid MQTT port</h2>"
+            "<a href='/'>Go back</a>"
+        );
+
+        return;
+    }
+
+    // ---------------------------------------------
+    // 5. Validate telemetry interval.
+    // ---------------------------------------------
+
+    long parsedInterval = telemetryInterval.toInt();
+
+    if (parsedInterval <= 0) {
+
+        m_server.send(
+            400,
+            "text/html",
+            "<h2>Invalid telemetry interval</h2>"
+            "<a href='/'>Go back</a>"
+        );
+
+        return;
+    }
+
+    // ---------------------------------------------
+    // 6. Update configuration.
+    // ---------------------------------------------
+
+    updatedConfig.wifiSSID = wifiSSID;
+
+    // Empty password means keep the existing password.
+    if (!wifiPassword.isEmpty()) {
+        updatedConfig.wifiPassword = wifiPassword;
+    }
+
+    updatedConfig.edgeId = edgeId;
+
+    updatedConfig.mqttHost = mqttHost;
+
+    updatedConfig.mqttPort = static_cast<uint16_t>(parsedPort);
+
+    updatedConfig.mqttUsername = mqttUsername;
+
+    // Empty password means keep the existing password.
+    if (!mqttPassword.isEmpty()) {
+        updatedConfig.mqttPassword = mqttPassword;
+    }
+
+    updatedConfig.telemetryIntervalMs =
+        static_cast<uint32_t>(parsedInterval);
+
+    // ---------------------------------------------
+    // 7. Save configuration to NVS.
+    // ---------------------------------------------
+
+    Serial.println("[PORTAL] Saving configuration...");
+
+    bool saved = m_configManager->save(updatedConfig);
+
+    if (!saved) {
+
+        Serial.println("[PORTAL] Failed to save configuration!");
+
+        m_server.send(
+            500,
+            "text/html",
+            "<h2>Failed to save configuration!</h2>"
+            "<p>Please try again.</p>"
+            "<a href='/'>Go back</a>"
+        );
+
+        return;
+    }
+
+    Serial.println("[PORTAL] Configuration saved successfully!");
+
+    // ---------------------------------------------
+    // 8. Send success response.
+    // ---------------------------------------------
+
+    String response = R"rawliteral(
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>Configuration Saved</title>
+            <style>
+                body {
+                    font-family: Arial, sans-serif;
+                    background: #f3f4f6;
+                    text-align: center;
+                    padding: 40px 15px;
+                }
+
+                .container {
+                    max-width: 420px;
+                    margin: auto;
+                    padding: 30px;
+                    background: white;
+                    border-radius: 12px;
+                    box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+                }
+
+                h2 {
+                    color: #16a34a;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h2>Configuration Saved!</h2>
+                <p>Your device configuration has been saved successfully.</p>
+                <p>ESP32 is restarting...</p>
+            </div>
+        </body>
+        </html>
+    )rawliteral";
+
     m_server.send(
         200,
-        "text/html; charset=utf-8",
-        "<!DOCTYPE html>"
-        "<html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
-        "<title>Saved</title></head>"
-        "<body style='font-family:Arial;text-align:center;padding:40px'>"
-        "<h2>Configuration saved successfully!</h2>"
-        "<p>The device is restarting...</p>"
-        "</body></html>"
+        "text/html",
+        response
     );
 
-    Serial.println("[PORTAL] Configuration saved. Restarting...");
+    Serial.println("[PORTAL] Restarting ESP32...");
 
-    delay(1000);
+    delay(1500);
 
-    stopPortal();
-
-    delay(500);
+    Serial.flush();
 
     ESP.restart();
 }
 
-String ConfigPortal::getNodeId() const {
-    const uint64_t mac = ESP.getEfuseMac();
+// =====================================================
+// HANDLE NOT FOUND
+// =====================================================
 
-    char nodeId[20];
+void ConfigPortal::handleNotFound() {
 
-    snprintf(
-        nodeId,
-        sizeof(nodeId),
-        "%llu",
-        static_cast<unsigned long long>(mac)
+    IPAddress apIP = WiFi.softAPIP();
+
+    String redirectURL = "http://" + apIP.toString() + "/";
+
+    m_server.sendHeader(
+        "Location",
+        redirectURL,
+        true
     );
 
-    return String(nodeId);
+    m_server.send(
+        302,
+        "text/plain",
+        ""
+    );
 }
 
+// =====================================================
+// BUILD HTML
+// =====================================================
 
 String ConfigPortal::buildHtml() const {
+
+    if (m_configManager == nullptr) {
+        return "<h2>Configuration manager is unavailable.</h2>";
+    }
+
     const DeviceConfig& config = m_configManager->get();
 
-    auto escapeHtml = [](const String& value) {
-        String result;
+    String html;
 
-        for (size_t i = 0; i < value.length(); i++) {
-            switch (value[i]) {
-                case '&': result += "&amp;"; break;
-                case '<': result += "&lt;"; break;
-                case '>': result += "&gt;"; break;
-                case '"': result += "&quot;"; break;
-                case '\'': result += "&#39;"; break;
-                default: result += value[i]; break;
-            }
-        }
+    html.reserve(6500);
 
-        return result;
-    };
+    // ---------------------------------------------
+    // HTML header.
+    // ---------------------------------------------
 
-    String html = R"rawliteral(
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    html += R"rawliteral(
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
 
-    <title>AIoT Device Configuration</title>
+            <title>ESP32 Configuration</title>
 
-    <style>
-        * {
-            box-sizing: border-box;
-        }
+            <style>
+                * {
+                    box-sizing: border-box;
+                }
 
-        body {
-            margin: 0;
-            padding: 20px;
-            background: #f1f5f9;
-            font-family: Arial, sans-serif;
-            color: #1e293b;
-        }
+                body {
+                    font-family: Arial, sans-serif;
+                    background: #f3f4f6;
+                    margin: 0;
+                    padding: 20px;
+                    color: #1f2937;
+                }
 
-        .container {
-            max-width: 650px;
-            margin: auto;
-        }
+                .container {
+                    max-width: 520px;
+                    margin: 20px auto;
+                    background: white;
+                    padding: 25px;
+                    border-radius: 12px;
+                    box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+                }
 
-        .header {
-            text-align: center;
-            margin-bottom: 25px;
-        }
+                h1 {
+                    text-align: center;
+                    font-size: 24px;
+                    margin-bottom: 8px;
+                }
 
-        .header h1 {
-            margin-bottom: 8px;
-            color: #0f172a;
-        }
+                .subtitle {
+                    text-align: center;
+                    color: #6b7280;
+                    margin-bottom: 25px;
+                    font-size: 14px;
+                }
 
-        .header p {
-            color: #64748b;
-        }
+                h3 {
+                    margin-top: 25px;
+                    padding-bottom: 8px;
+                    border-bottom: 1px solid #e5e7eb;
+                }
 
-        .card {
-            background: white;
-            padding: 22px;
-            margin-bottom: 18px;
-            border-radius: 12px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-        }
+                label {
+                    display: block;
+                    margin-top: 15px;
+                    margin-bottom: 6px;
+                    font-weight: bold;
+                    font-size: 14px;
+                }
 
-        .card h2 {
-            font-size: 18px;
-            margin-top: 0;
-            margin-bottom: 18px;
-            color: #2563eb;
-        }
+                input {
+                    width: 100%;
+                    padding: 11px;
+                    border: 1px solid #d1d5db;
+                    border-radius: 7px;
+                    font-size: 15px;
+                }
 
-        label {
-            display: block;
-            font-size: 14px;
-            font-weight: bold;
-            margin-bottom: 7px;
-        }
+                input:focus {
+                    outline: none;
+                    border-color: #2563eb;
+                }
 
-        input {
-            width: 100%;
-            padding: 12px;
-            margin-bottom: 16px;
-            border: 1px solid #cbd5e1;
-            border-radius: 7px;
-            font-size: 15px;
-        }
+                .hint {
+                    color: #6b7280;
+                    font-size: 12px;
+                    margin-top: 5px;
+                }
 
-        input:focus {
-            outline: none;
-            border-color: #2563eb;
-        }
+                button {
+                    width: 100%;
+                    margin-top: 28px;
+                    padding: 13px;
+                    border: none;
+                    border-radius: 7px;
+                    background: #2563eb;
+                    color: white;
+                    font-size: 16px;
+                    font-weight: bold;
+                    cursor: pointer;
+                }
 
-        input[readonly] {
-            background: #e2e8f0;
-            color: #475569;
-        }
+                button:hover {
+                    background: #1d4ed8;
+                }
 
-        button {
-            width: 100%;
-            padding: 15px;
-            border: none;
-            border-radius: 8px;
-            background: #2563eb;
-            color: white;
-            font-size: 16px;
-            font-weight: bold;
-            cursor: pointer;
-        }
+                .footer {
+                    text-align: center;
+                    margin-top: 20px;
+                    color: #9ca3af;
+                    font-size: 12px;
+                }
+            </style>
+        </head>
 
-        button:active {
-            background: #1d4ed8;
-        }
+        <body>
+            <div class="container">
 
-        .note {
-            font-size: 12px;
-            color: #64748b;
-            margin-top: -10px;
-            margin-bottom: 16px;
-        }
-    </style>
-</head>
+                <h1>ESP32 Configuration</h1>
 
-<body>
-<div class="container">
+                <p class="subtitle">
+                    Configure your IoT device
+                </p>
 
-    <div class="header">
-        <h1>AIoT Device Setup</h1>
-        <p>Configure your device connection and system settings</p>
-    </div>
+                <form action="/save" method="POST">
 
-    <form action="/save" method="POST">
+                    <h3>WiFi Configuration</h3>
+    )rawliteral";
 
-        <div class="card">
-            <h2>Device Information</h2>
+    // ---------------------------------------------
+    // WiFi SSID.
+    // ---------------------------------------------
 
-            <label>Node ID</label>
-            <input type="text" value=")rawliteral";
-
-    html += escapeHtml(getNodeId());
-
-    html += R"rawliteral(" readonly>
-
-            <label>Site ID</label>
-            <input type="text" name="site_id" value=")rawliteral";
-
-    html += escapeHtml(config.siteId);
-
-    html += R"rawliteral(" required>
-
-            <label>Zone ID</label>
-            <input type="text" name="zone_id" value=")rawliteral";
-
-    html += escapeHtml(config.zoneId);
-
-    html += R"rawliteral(" required>
-
-            <label>Edge ID</label>
-            <input type="text" name="edge_id" value=")rawliteral";
-
-    html += escapeHtml(config.edgeId);
-
-    html += R"rawliteral(" required>
-        </div>
-
-        <div class="card">
-            <h2>Wi-Fi Configuration</h2>
-
-            <label>Wi-Fi SSID</label>
-            <input type="text" name="wifi_ssid" value=")rawliteral";
+    html += R"rawliteral(
+                    <label for="wifiSSID">WiFi SSID</label>
+                    <input
+                        type="text"
+                        id="wifiSSID"
+                        name="wifiSSID"
+                        required
+                        maxlength="32"
+                        value="
+    )rawliteral";
 
     html += escapeHtml(config.wifiSSID);
 
-    html += R"rawliteral(" required>
+    html += R"rawliteral(
+                    ">
+    )rawliteral";
 
-            <label>Wi-Fi Password</label>
-            <input type="password" name="wifi_password" value=")rawliteral";
+    // ---------------------------------------------
+    // WiFi password.
+    // ---------------------------------------------
 
-    html += escapeHtml(config.wifiPassword);
+    html += R"rawliteral(
+                    <label for="wifiPassword">WiFi Password</label>
+                    <input
+                        type="password"
+                        id="wifiPassword"
+                        name="wifiPassword"
+                        placeholder="Leave blank to keep current password"
+                        autocomplete="new-password"
+                    >
 
-    html += R"rawliteral(">
-        </div>
+                    <p class="hint">
+                        Leave blank if you do not want to change the password.
+                    </p>
 
-        <div class="card">
-            <h2>MQTT Configuration</h2>
+                    <h3>Device Configuration</h3>
+    )rawliteral";
 
-            <label>MQTT Broker</label>
-            <input type="text" name="mqtt_host" value=")rawliteral";
+    // ---------------------------------------------
+    // Edge ID.
+    // ---------------------------------------------
+
+    html += R"rawliteral(
+                    <label for="edgeId">Edge ID</label>
+                    <input
+                        type="text"
+                        id="edgeId"
+                        name="edgeId"
+                        required
+                        value="
+    )rawliteral";
+
+    html += escapeHtml(config.edgeId);
+
+    html += R"rawliteral(
+                    ">
+
+                    <h3>MQTT Configuration</h3>
+    )rawliteral";
+
+    // ---------------------------------------------
+    // MQTT host.
+    // ---------------------------------------------
+
+    html += R"rawliteral(
+                    <label for="mqttHost">MQTT Host</label>
+                    <input
+                        type="text"
+                        id="mqttHost"
+                        name="mqttHost"
+                        required
+                        value="
+    )rawliteral";
 
     html += escapeHtml(config.mqttHost);
 
-    html += R"rawliteral(" required>
+    html += R"rawliteral(
+                    ">
+    )rawliteral";
 
-            <label>MQTT Port</label>
-            <input type="number" name="mqtt_port" min="1" max="65535" value=")rawliteral";
+    // ---------------------------------------------
+    // MQTT port.
+    // ---------------------------------------------
+
+    html += R"rawliteral(
+                    <label for="mqttPort">MQTT Port</label>
+                    <input
+                        type="number"
+                        id="mqttPort"
+                        name="mqttPort"
+                        min="1"
+                        max="65535"
+                        required
+                        value="
+    )rawliteral";
 
     html += String(config.mqttPort);
 
-    html += R"rawliteral(" required>
+    html += R"rawliteral(
+                    ">
+    )rawliteral";
 
-            <label>MQTT Username</label>
-            <input type="text" name="mqtt_username" value=")rawliteral";
+    // ---------------------------------------------
+    // MQTT username.
+    // ---------------------------------------------
+
+    html += R"rawliteral(
+                    <label for="mqttUsername">MQTT Username</label>
+                    <input
+                        type="text"
+                        id="mqttUsername"
+                        name="mqttUsername"
+                        value="
+    )rawliteral";
 
     html += escapeHtml(config.mqttUsername);
 
-    html += R"rawliteral(">
+    html += R"rawliteral(
+                    ">
+    )rawliteral";
 
-            <label>MQTT Password</label>
-            <input type="password" name="mqtt_password" value=")rawliteral";
+    // ---------------------------------------------
+    // MQTT password.
+    // ---------------------------------------------
 
-    html += escapeHtml(config.mqttPassword);
+    html += R"rawliteral(
+                    <label for="mqttPassword">MQTT Password</label>
+                    <input
+                        type="password"
+                        id="mqttPassword"
+                        name="mqttPassword"
+                        placeholder="Leave blank to keep current password"
+                        autocomplete="new-password"
+                    >
 
-    html += R"rawliteral(">
-        </div>
+                    <p class="hint">
+                        Leave blank if you do not want to change the password.
+                    </p>
 
-        <div class="card">
-            <h2>System Configuration</h2>
+                    <h3>Telemetry Configuration</h3>
+    )rawliteral";
 
-            <label>Telemetry Interval (ms)</label>
-            <input
-                type="number"
-                name="telemetry_interval"
-                min="1000"
-                max="3600000"
-                value=")rawliteral";
+    // ---------------------------------------------
+    // Telemetry interval.
+    // ---------------------------------------------
+
+    html += R"rawliteral(
+                    <label for="telemetryIntervalMs">
+                        Telemetry Interval (milliseconds)
+                    </label>
+
+                    <input
+                        type="number"
+                        id="telemetryIntervalMs"
+                        name="telemetryIntervalMs"
+                        min="1"
+                        required
+                        value="
+    )rawliteral";
 
     html += String(config.telemetryIntervalMs);
 
-    html += R"rawliteral("
-                required
-            >
+    html += R"rawliteral(
+                    ">
 
-            <p class="note">
-                Allowed range: 1000 - 3600000 milliseconds
-            </p>
-        </div>
+                    <button type="submit">
+                        Save Configuration
+                    </button>
 
-        <button type="submit">
-            Save Configuration
-        </button>
+                </form>
 
-    </form>
-</div>
-</body>
-</html>
-)rawliteral";
+                <div class="footer">
+                    ESP32 IoT Configuration Portal
+                </div>
+
+            </div>
+        </body>
+        </html>
+    )rawliteral";
 
     return html;
+}
+
+// =====================================================
+// GET NODE ID
+// =====================================================
+
+String ConfigPortal::getNodeId() const {
+
+    String macAddress = WiFi.macAddress();
+
+    macAddress.replace(":", "");
+
+    return macAddress;
 }

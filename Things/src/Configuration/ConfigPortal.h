@@ -11,14 +11,15 @@
 class ConfigPortal {
 public:
     void begin(DeviceConfigManager* configManager);
+
     void loop();
 
     bool isActive() const;
 
-private:
-    static constexpr uint8_t BUTTON_PIN = 25;
-    static constexpr uint32_t LONG_PRESS_MS = 5000;
+    // Called by PowerButton when the user holds the button for 5 seconds.
+    void open();
 
+private:
     static constexpr uint16_t DNS_PORT = 53;
     static constexpr uint16_t HTTP_PORT = 80;
 
@@ -28,12 +29,6 @@ private:
     DNSServer m_dnsServer;
 
     bool m_isActive = false;
-    bool m_buttonPressed = false;
-    bool m_longPressTriggered = false;
-
-    uint32_t m_buttonPressTime = 0;
-
-    void handleButton();
 
     void startPortal();
     void stopPortal();

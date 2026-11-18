@@ -18,6 +18,25 @@
 #include "Telemetry/TelemetryBuilder.h"
 #include "MQTT/MQTTClient.h"
 
+#include "Actuator/PowerButton.h"
+#include "Actuator/StatusLed.h"
+#include "Actuator/PumpController.h"
+
+
+// =====================================================
+// SYSTEM OBJECTS
+// =====================================================
+
+PowerButton powerButton;
+StatusLed statusLed;
+
+PumpController pumpController(
+    18, // L298N ENA
+    19, // L298N IN1
+    21  // L298N IN2
+);
+
+
 // =====================================================
 // CAMERA UART CONFIGURATION
 // =====================================================
@@ -35,22 +54,25 @@ CameraUARTClient cameraClient;
 
 uint32_t sampleSequence = 0;
 
+
 // =====================================================
 // SENSOR CONFIGURATION
 // =====================================================
 
 SensorManager sensorManager(
-    27,     // Soil moisture pin
+    34,     // Soil moisture pin (ADC1)
     26,     // DHT22 pin
     3200,   // Dry calibration
     1400    // Wet calibration
 );
+
 
 // =====================================================
 // DEVICE IDENTITY
 // =====================================================
 
 DeviceIdentity deviceIdentity;
+
 
 // =====================================================
 // DEVICE CONFIGURATION
@@ -60,9 +82,8 @@ DeviceConfigManager configManager;
 
 ConfigPortal configPortal;
 
-// TelemetryBuilder needs the runtime Zone ID.
-// It is initialized after loading configuration from NVS.
-TelemetryBuilder* telemetryBuilder = nullptr;
+TelemetryBuilder telemetryBuilder;
+
 
 // =====================================================
 // MQTT
@@ -73,13 +94,13 @@ MQTTClient mqttClient;
 String telemetryTopic;
 String imageTopic;
 
+
 // =====================================================
 // CAMERA COMMAND
 // =====================================================
 
-// Set to true when an Edge capture command is received.
-// Camera UART request will be handled in loop().
 volatile bool captureCommandPending = false;
+
 
 // =====================================================
 // SCHEDULER
@@ -87,11 +108,13 @@ volatile bool captureCommandPending = false;
 
 uint32_t lastTelemetryTime = 0;
 
+
 // =====================================================
 // WIFI CONFIGURATION
 // =====================================================
 
 constexpr uint32_t WIFI_CONNECT_TIMEOUT_MS = 15000;
+
 
 // =====================================================
 // NTP CONFIGURATION
@@ -102,30 +125,34 @@ const char* SECONDARY_NTP_SERVER = "time.nist.gov";
 
 constexpr std::time_t MIN_VALID_TIMESTAMP = 1700000000;
 
+
 // =====================================================
 // BUILD MQTT TOPICS
 // =====================================================
 
 void buildAndPrintTopics() {
+
     const DeviceConfig& config = configManager.get();
 
-    const String siteId = config.siteId;
+    const String edgeId = config.edgeId;
     const String nodeId = deviceIdentity.getNodeId();
 
-    telemetryTopic =
-        "iot/" + siteId + "/" + nodeId + "/telemetry";
+    const String baseTopic =
+        "iot/" + edgeId + "/" + nodeId;
 
-    imageTopic =
-        "iot/" + siteId + "/" + nodeId + "/image";
+    telemetryTopic = baseTopic + "/telemetry";
+    imageTopic = baseTopic + "/image";
 
-    String commandTopic =
-        "iot/" +
-        config.edgeId + "/" +
-        nodeId +
-        "/command";
+    String commandTopic = baseTopic + "/command";
 
     Serial.println();
     Serial.println("========== MQTT TOPICS ==========");
+
+    Serial.print("[MQTT] Edge ID: ");
+    Serial.println(edgeId);
+
+    Serial.print("[MQTT] Node ID: ");
+    Serial.println(nodeId);
 
     Serial.print("[MQTT] Telemetry topic: ");
     Serial.println(telemetryTopic);
@@ -139,11 +166,13 @@ void buildAndPrintTopics() {
     Serial.println("=================================");
 }
 
+
 // =====================================================
 // TIMESTAMP
 // =====================================================
 
 String getVietnamTimestamp() {
+
     auto now = std::chrono::system_clock::now();
 
     std::time_t currentTime =
@@ -174,6 +203,65 @@ String getVietnamTimestamp() {
     return String(timestamp);
 }
 
+
+// =====================================================
+// HANDLE POWER BUTTON ACTION
+// =====================================================
+
+void handlePowerButton() {
+
+    PowerButton::Action action = powerButton.update();
+
+    switch (action) {
+
+        case PowerButton::Action::RESTART:
+
+            Serial.println();
+            Serial.println("[POWER] Stopping pump before restart...");
+
+            pumpController.stop();
+
+            Serial.println("[POWER] Restarting ESP32...");
+
+            Serial.flush();
+
+            ESP.restart();
+
+            break;
+
+
+        case PowerButton::Action::DEEP_SLEEP:
+
+            Serial.println("[POWER] Stopping pump before deep sleep...");
+
+            pumpController.stop();
+
+            powerButton.enterDeepSleep();
+
+            break;
+
+
+        case PowerButton::Action::OPEN_CONFIG:
+
+            Serial.println("[POWER] Stopping pump before opening portal...");
+
+            pumpController.stop();
+
+            Serial.println("[POWER] Opening configuration portal...");
+
+            configPortal.open();
+
+            break;
+
+
+        case PowerButton::Action::NONE:
+        default:
+
+            break;
+    }
+}
+
+
 // =====================================================
 // HANDLE CAPTURE COMMAND
 // =====================================================
@@ -192,6 +280,7 @@ void handleCaptureCommand() {
 
     // Check whether camera is processing another request.
     if (cameraClient.isBusy()) {
+
         Serial.println(
             "[CAMERA] Capture rejected: camera is busy!"
         );
@@ -207,6 +296,7 @@ void handleCaptureCommand() {
 
     // Send capture request to ESP32-S3.
     if (!cameraClient.requestCapture(sampleSequence)) {
+
         Serial.println(
             "[CAMERA] Failed to send capture request!"
         );
@@ -220,6 +310,7 @@ void handleCaptureCommand() {
 
     Serial.println("====================================");
 }
+
 
 // =====================================================
 // CAMERA RESPONSE HANDLING
@@ -256,10 +347,7 @@ void handleCameraResponse() {
             Serial.print("[MQTT] Image topic: ");
             Serial.println(imageTopic);
 
-            // -----------------------------------------
             // Publish JPEG image to MQTT.
-            // -----------------------------------------
-
             bool published = mqttClient.publishImage(
                 image.sampleSeq,
                 image.data,
@@ -267,20 +355,19 @@ void handleCameraResponse() {
             );
 
             if (published) {
+
                 Serial.println(
                     "[CAMERA] Image submitted to MQTT successfully!"
                 );
             }
             else {
+
                 Serial.println(
                     "[CAMERA] Image MQTT publish failed!"
                 );
             }
 
-            // -----------------------------------------
             // Release image memory.
-            // -----------------------------------------
-
             free(image.data);
 
             image.data = nullptr;
@@ -305,6 +392,7 @@ void handleCameraResponse() {
         cameraClient.reset();
     }
 }
+
 
 // =====================================================
 // TELEMETRY HANDLING
@@ -347,7 +435,7 @@ void handleTelemetry() {
     // 4. Build telemetry.
     // ---------------------------------------------
 
-    TelemetryData telemetry = telemetryBuilder->build(
+    TelemetryData telemetry = telemetryBuilder.build(
         sensorData,
         deviceIdentity,
         sampledAt
@@ -357,7 +445,7 @@ void handleTelemetry() {
     // 5. Convert telemetry to JSON.
     // ---------------------------------------------
 
-    String payload = telemetryBuilder->toJson(telemetry);
+    String payload = telemetryBuilder.toJson(telemetry);
 
     // ---------------------------------------------
     // 6. Print telemetry.
@@ -387,16 +475,19 @@ void handleTelemetry() {
         mqttClient.publishTelemetry(payload);
 
     if (telemetryPublished) {
+
         Serial.println(
             "[TELEMETRY] Publish request accepted!"
         );
     }
     else {
+
         Serial.println(
             "[TELEMETRY] Publish request failed!"
         );
     }
 }
+
 
 // =====================================================
 // WIFI CONNECTION
@@ -422,19 +513,38 @@ bool connectWiFi() {
     Serial.print("[WIFI] Connecting");
 
     uint32_t startTime = millis();
+    uint32_t lastDotTime = startTime;
 
     while (
         WiFi.status() != WL_CONNECTED &&
         millis() - startTime < WIFI_CONNECT_TIMEOUT_MS
     ) {
-        delay(250);
-        Serial.print(".");
+
+        // Handle button while waiting for Wi-Fi.
+        handlePowerButton();
+
+        // Update status LED.
+        statusLed.update(false);
+
+        // Keep pump scheduler running.
+        pumpController.update();
+
+        if (millis() - lastDotTime >= 250) {
+
+            Serial.print(".");
+
+            lastDotTime = millis();
+        }
+
+        delay(10);
     }
 
     Serial.println();
 
     if (WiFi.status() != WL_CONNECTED) {
+
         Serial.println("[WIFI] Connection failed!");
+
         Serial.println(
             "[WIFI] Device will continue running. "
             "Use GPIO25 to open configuration portal."
@@ -451,6 +561,7 @@ bool connectWiFi() {
     return true;
 }
 
+
 // =====================================================
 // NTP INITIALIZATION
 // =====================================================
@@ -458,6 +569,7 @@ bool connectWiFi() {
 void initializeNTP() {
 
     if (WiFi.status() != WL_CONNECTED) {
+
         Serial.println(
             "[NTP] Skipped because WiFi is disconnected."
         );
@@ -475,8 +587,38 @@ void initializeNTP() {
         SECONDARY_NTP_SERVER
     );
 
-    Serial.println("[NTP] Synchronization requested.");
+    Serial.println("[NTP] Waiting for time synchronization...");
+
+    uint32_t startTime = millis();
+
+    while (
+        std::time(nullptr) < MIN_VALID_TIMESTAMP &&
+        millis() - startTime < 10000
+    ) {
+
+        handlePowerButton();
+
+        statusLed.update(false);
+
+        pumpController.update();
+
+        delay(100);
+    }
+
+    if (std::time(nullptr) >= MIN_VALID_TIMESTAMP) {
+
+        Serial.println("[NTP] Time synchronized successfully.");
+    }
+    else {
+
+        Serial.println("[NTP] Time synchronization failed!");
+
+        Serial.println(
+            "[NTP] Commands will be rejected until time is valid."
+        );
+    }
 }
+
 
 // =====================================================
 // MQTT INITIALIZATION
@@ -489,7 +631,10 @@ void initializeMQTT() {
     Serial.println();
     Serial.println("========== MQTT INITIALIZATION ==========");
 
-    // Configure Edge capture command callback.
+    // ---------------------------------------------
+    // 1. Capture command callback.
+    // ---------------------------------------------
+
     mqttClient.setCaptureCommandCallback([]() {
 
         Serial.println(
@@ -499,19 +644,34 @@ void initializeMQTT() {
         captureCommandPending = true;
     });
 
-    // Initialize MQTT with runtime configuration.
+    // ---------------------------------------------
+    // 2. Pump command callback.
+    // ---------------------------------------------
+
+    mqttClient.setPumpCommandCallback([](uint32_t durationMs) {
+
+        Serial.println();
+        Serial.println("[COMMAND] Starting water pump...");
+
+        return pumpController.start(durationMs);
+    });
+
+    // ---------------------------------------------
+    // 3. Initialize MQTT.
+    // ---------------------------------------------
+
     mqttClient.begin(
-        config.siteId.c_str(),
+        config.edgeId,
         deviceIdentity.getNodeId(),
-        config.edgeId.c_str(),
-        config.mqttHost.c_str(),
+        config.mqttHost,
         config.mqttPort,
-        config.mqttUsername.c_str(),
-        config.mqttPassword.c_str()
+        config.mqttUsername,
+        config.mqttPassword
     );
 
     buildAndPrintTopics();
 }
+
 
 // =====================================================
 // SETUP
@@ -521,6 +681,17 @@ void setup() {
 
     Serial.begin(115200);
 
+    // ---------------------------------------------
+    // 1. Initialize power button and status LED.
+    // ---------------------------------------------
+
+    powerButton.begin();
+
+    statusLed.begin();
+
+    // Initialize pump controller.
+    pumpController.begin();
+
     delay(1000);
 
     Serial.println();
@@ -529,7 +700,7 @@ void setup() {
     Serial.println("======================================");
 
     // ---------------------------------------------
-    // 1. Initialize camera UART.
+    // 2. Initialize camera UART.
     // ---------------------------------------------
 
     Serial.println();
@@ -570,7 +741,7 @@ void setup() {
     );
 
     // ---------------------------------------------
-    // 2. Initialize device identity.
+    // 3. Initialize device identity.
     // ---------------------------------------------
 
     Serial.println();
@@ -582,13 +753,14 @@ void setup() {
     Serial.println(deviceIdentity.getNodeId());
 
     // ---------------------------------------------
-    // 3. Load configuration from NVS.
+    // 4. Load configuration from NVS.
     // ---------------------------------------------
 
     Serial.println();
     Serial.println("========== CONFIGURATION INITIALIZATION ==========");
 
     if (!configManager.begin()) {
+
         Serial.println(
             "[CONFIG] Failed to load configuration!"
         );
@@ -605,12 +777,6 @@ void setup() {
     Serial.print("[CONFIG] WiFi SSID: ");
     Serial.println(config.wifiSSID);
 
-    Serial.print("[CONFIG] Site ID: ");
-    Serial.println(config.siteId);
-
-    Serial.print("[CONFIG] Zone ID: ");
-    Serial.println(config.zoneId);
-
     Serial.print("[CONFIG] Edge ID: ");
     Serial.println(config.edgeId);
 
@@ -624,11 +790,8 @@ void setup() {
     Serial.print(config.telemetryIntervalMs);
     Serial.println(" ms");
 
-    // Initialize TelemetryBuilder with runtime Zone ID.
-    telemetryBuilder = new TelemetryBuilder(config.zoneId);
-
     // ---------------------------------------------
-    // 4. Initialize configuration portal.
+    // 5. Initialize configuration portal.
     // ---------------------------------------------
 
     Serial.println();
@@ -637,10 +800,13 @@ void setup() {
     configPortal.begin(&configManager);
 
     Serial.println("[PORTAL] Ready!");
-    Serial.println("[PORTAL] Hold GPIO25 for 5 seconds to open AP.");
+
+    Serial.println(
+        "[PORTAL] Hold GPIO25 for 5 seconds to open AP."
+    );
 
     // ---------------------------------------------
-    // 5. Initialize sensors.
+    // 6. Initialize sensors.
     // ---------------------------------------------
 
     Serial.println();
@@ -649,13 +815,13 @@ void setup() {
     sensorManager.begin();
 
     // ---------------------------------------------
-    // 6. Connect WiFi.
+    // 7. Connect Wi-Fi.
     // ---------------------------------------------
 
     bool wifiConnected = connectWiFi();
 
     // ---------------------------------------------
-    // 7. Initialize NTP.
+    // 8. Initialize NTP.
     // ---------------------------------------------
 
     if (wifiConnected) {
@@ -663,13 +829,13 @@ void setup() {
     }
 
     // ---------------------------------------------
-    // 8. Initialize MQTT.
+    // 9. Initialize MQTT.
     // ---------------------------------------------
 
     initializeMQTT();
 
     // ---------------------------------------------
-    // 9. Initialize sampling timer.
+    // 10. Initialize telemetry scheduler.
     // ---------------------------------------------
 
     lastTelemetryTime = millis();
@@ -678,12 +844,14 @@ void setup() {
     Serial.println("========== SYSTEM READY ==========");
 
     if (!wifiConnected) {
+
         Serial.println(
             "[SYSTEM] WiFi unavailable. Configuration portal "
             "can be opened using GPIO25."
         );
     }
 }
+
 
 // =====================================================
 // LOOP
@@ -692,46 +860,68 @@ void setup() {
 void loop() {
 
     // ---------------------------------------------
-    // 1. Handle configuration button and portal.
+    // 1. Handle power button.
+    // ---------------------------------------------
+
+    handlePowerButton();
+
+    // ---------------------------------------------
+    // 2. Update pump controller.
+    // ---------------------------------------------
+
+    pumpController.update();
+
+    // ---------------------------------------------
+    // 3. Update connection status LED.
+    // ---------------------------------------------
+
+    statusLed.update(mqttClient.isConnected());
+
+    // ---------------------------------------------
+    // 4. Handle configuration portal.
     // ---------------------------------------------
 
     configPortal.loop();
 
     // ---------------------------------------------
-    // 2. Maintain MQTT connection.
+    // 5. Maintain MQTT connection.
     // ---------------------------------------------
 
     mqttClient.loop();
 
+    statusLed.update(mqttClient.isConnected());
+
     // ---------------------------------------------
-    // 3. Handle pending Edge capture command.
+    // 6. Handle pending Edge capture command.
     // ---------------------------------------------
 
     handleCaptureCommand();
 
     // ---------------------------------------------
-    // 4. Receive camera data continuously.
+    // 7. Receive camera data continuously.
     // ---------------------------------------------
 
     cameraClient.loop();
 
     // ---------------------------------------------
-    // 5. Process camera response.
+    // 8. Process camera response.
     // ---------------------------------------------
 
     handleCameraResponse();
 
     // ---------------------------------------------
-    // 6. Wait for MQTT connection.
+    // 9. Wait for MQTT connection.
     // ---------------------------------------------
 
     if (!mqttClient.isConnected()) {
+
         delay(1);
+
         return;
     }
 
     // ---------------------------------------------
-    // 7. Read sensors and publish telemetry.
+    // 10. Read sensors and publish telemetry.
     // ---------------------------------------------
 
     handleTelemetry();

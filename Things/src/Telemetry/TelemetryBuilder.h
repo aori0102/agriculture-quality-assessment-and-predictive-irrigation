@@ -1,3 +1,4 @@
+
 #pragma once
 
 #include <Arduino.h>
@@ -8,12 +9,7 @@
 #include "../Identity/DeviceIdentity.h"
 
 class TelemetryBuilder {
-private:
-    String m_zoneId;
-
 public:
-    explicit TelemetryBuilder(const String& zoneId);
-
     TelemetryData build(
         const SensorData& sensorData,
         const DeviceIdentity& identity,

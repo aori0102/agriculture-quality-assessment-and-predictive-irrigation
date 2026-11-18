@@ -1,8 +1,9 @@
+
 #include "TopicBuilder.h"
 
 String TopicBuilder::telemetryTopic(
-    const String& siteId,
+    const String& edgeId,
     const String& deviceId
 ) {
-    return "iot/" + siteId + "/" + deviceId + "/telemetry";
+    return "iot/" + edgeId + "/" + deviceId + "/telemetry";
 }

@@ -4,7 +4,6 @@
 #include <Arduino.h>
 
 struct TelemetryData {
-    String zoneId;
     String nodeId;
     String sampledAt;
 
