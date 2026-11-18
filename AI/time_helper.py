@@ -1,59 +1,77 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+
 
 class TimeHelper:
     @staticmethod
-    def floor_to_nearest_ten_minutes(datetime: datetime) -> datetime:
-        """
-        Floor the given datetime to the nearest 10-minute mark.
-        
-        Args:
-            datetime (datetime): The datetime object to be floored.
-        
-        Returns:
-            datetime: A new datetime object floored to the nearest 10-minute mark.
-        """
-        return datetime.replace(
-            minute=(datetime.minute // 10) * 10,
-            second=0,
-            microsecond=0
-        )
-        
-        
-    @staticmethod
-    def process_time(raw: str) -> datetime | None:
-        """
-        Convert a raw timestamp string into a datetime object. The raw timestamp is 
-        expected to be in ISO 8601 format. If the conversion fails, the function will 
-        print an error message and return None.
+    def process_time(raw: datetime | str, *, require_timezone: bool = False) -> datetime | None:
+        """Normalize an ISO timestamp to UTC; legacy naive values mean UTC.
+
+        External telemetry must set require_timezone=True so a missing offset
+        is rejected rather than interpreted using the host's local timezone.
         """
         try:
-            return datetime.fromisoformat(raw)
-        except (TypeError, ValueError):
-            print(f"Invalid timestamp format: {raw}")
+            value = raw if isinstance(raw, datetime) else datetime.fromisoformat(raw)
+            if value.tzinfo is None or value.utcoffset() is None:
+                if require_timezone:
+                    return None
+                value = value.replace(tzinfo=timezone.utc)
+            return value.astimezone(timezone.utc)
+        except (TypeError, ValueError, OverflowError):
             return None
-    
-    
+
+    @staticmethod
+    def format_time(value: datetime | str) -> str:
+        """Return YYYY-MM-DDTHH:MM:SS+00:00, without fractional seconds."""
+        timestamp = TimeHelper.process_time(value)
+        if timestamp is None:
+            raise ValueError("Invalid timestamp")
+        return timestamp.isoformat(timespec="seconds")
+
+    @staticmethod
+    def floor_to_nearest_ten_minutes(datetime: datetime) -> datetime:
+        """Convert to UTC before flooring to a 10-minute window."""
+        value = TimeHelper.process_time(datetime)
+        if value is None:
+            raise ValueError("Invalid timestamp")
+        return value.replace(minute=(value.minute // 10) * 10, second=0, microsecond=0)
+
+    @staticmethod
+    def get_slot(raw: datetime | str, *, offset_windows: int = 0) -> datetime | None:
+        """Parse a UTC 10-minute window; return None for invalid timestamps.
+
+        offset_windows=-1 selects the immediately preceding window.
+        """
+        value = TimeHelper.process_time(raw)
+        if value is None or value != value:
+            return None
+        try:
+            return TimeHelper.floor_to_nearest_ten_minutes(value) + timedelta(
+                minutes=10 * offset_windows
+            )
+        except (TypeError, ValueError, OverflowError):
+            return None
+
     @staticmethod
     def get_current_slot() -> datetime:
-        """Return the start of the current 10-minute slot in UTC."""
         return TimeHelper.floor_to_nearest_ten_minutes(datetime.now(timezone.utc))
-    
+
     @staticmethod
     def get_current_timestamp_floor() -> str:
-        """Return the start of the current 10-minute slot in UTC as an ISO 8601 string."""
-        return TimeHelper.get_current_slot().isoformat(timespec="seconds")
+        return TimeHelper.format_time(TimeHelper.get_current_slot())
 
     @staticmethod
     def get_current_timestamp() -> str:
-        """
-        Get the current UTC slot in ISO 8601 format.
+        return TimeHelper.format_time(datetime.now(timezone.utc))
 
-        Returns:
-            str: Current timestamp in ISO 8601 format.
-        """
-        return datetime.now(timezone.utc).isoformat(timespec="seconds")
-    
-    
     @staticmethod
     def get_current_minute() -> int:
         return datetime.now(timezone.utc).minute
+
+    @staticmethod
+    def is_window_expired(raw: datetime | str, now: datetime | str, timeout_minutes: float) -> bool:
+        """Old windows are closed; the current window closes at its timeout."""
+        slot = TimeHelper.get_slot(raw)
+        current = TimeHelper.process_time(now)
+        if slot is None or current is None:
+            raise ValueError("Invalid timestamp when checking window expiry")
+        return slot < TimeHelper.get_slot(current) or (current - slot).total_seconds() >= timeout_minutes * 60

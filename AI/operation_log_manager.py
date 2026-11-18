@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 from configparser import ConfigParser
+from node_profile import NodeProfile
 
 CONFIG_FILE = "config.cfg"
 LOG_FILE = "operation_log.json"
@@ -138,9 +139,25 @@ class OperationLogManager:
         self.save_log(log)
 
 
+    def get_node_profile(self, node_id: str) -> NodeProfile | None:
+        """Return the node's profile, or None if it is absent or incomplete."""
+        if not isinstance(node_id, str) or not node_id:
+            return None
+
+        profile = self.load_log()["node_profile"].get(node_id)
+        if not isinstance(profile, dict):
+            return None
+
+        fields = ("node_id", "plant", "pwp", "madp", "fc", "sp")
+        if any(profile.get(field) is None for field in fields):
+            return None
+
+        return NodeProfile(**{field: profile[field] for field in fields})
+
+
     def read_all_recorded_nodes(self) -> list[str]:
         log = self.load_log()
-        recorded_nodes = [node['node_id'] for node in log['node_profile']]
+        recorded_nodes = [node for node in log['node_profile']]
         return recorded_nodes
     
     

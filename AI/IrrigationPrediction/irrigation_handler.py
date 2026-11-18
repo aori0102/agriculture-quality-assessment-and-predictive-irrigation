@@ -2,6 +2,7 @@ import joblib
 import pandas as pd
 import paho.mqtt.client as mqtt
 import json
+from .irrigation_data_handler import irrigation_data_handler
 from . import field_constants as fc
 from .telemetry_handler import telemetry_handler
 from time_helper import TimeHelper
@@ -9,9 +10,9 @@ from pathlib import Path
 from configparser import ConfigParser
 from datetime import datetime, timezone
 from time import monotonic
-from acquired_node_handler import AcquiredNodeHandler
 from action_index import ActionIndex
 from command_proxy import command_proxy
+from operation_log_manager import operation_log_manager
 
 class IrrigationHandler:
     def __init__(self):
@@ -25,18 +26,44 @@ class IrrigationHandler:
         self.current_sample_slot = None
         self.has_handled_this_timestamp = False
         self.last_handling = monotonic()
-                
-        self.default_irrigation_minutes = cfg.getint("irrigation", "default_irrigation_minutes")
-        self.reduced_irrigation_minutes = cfg.getint("irrigation", "reduced_irrigation_minutes")
-        self.sample_delay_seconds = cfg.getint("sampling", "sample_delay_seconds")
-        self.sample_timeout_minutes = cfg.getint("sampling", "sample_timeout_minutes")
+        
+        self.sample_delay_seconds = cfg.getfloat("sampling", "sample_delay_seconds", fallback=1.0)
+        self.sample_timeout_minutes = cfg.getint("sampling", "sample_timeout_minutes", fallback=5)
+
+        self.irrigation_sampling_duration = json.loads(cfg.get("irrigation", "irrigation_sampling", fallback="[0.1, 0.5, 1.0, 2.0, 5.0, 8.0]"))
+        self.max_irrigation_duration = self.irrigation_sampling_duration[-1]
+        self.irrigation_sampling_duration = self.irrigation_sampling_duration[:-1]
                 
         model_path = Path(__file__).with_name(cfg.get("model", "model_path"))
         self.model = joblib.load(model_path)
+            
         
-        plant_path = Path(__file__).with_name(cfg.get("plant", "plant_profile_path"))
-        with plant_path.open("r", encoding="utf-8") as file:
-            self.plant_profile = json.load(file)
+    def predict(
+        self,
+        soil_moisture_percentage: float,
+        soil_moisture_change_last_10m: float,
+        air_temperature_celsius: float,
+        air_relative_humidity_percentage: float,
+        irrigation_last_10m: float,
+        irrigation_duration_minutes: float
+    ) -> float:
+        """Predict soil moisture (%) after 10 minutes using the trained pipeline.
+
+        Irrigation inputs are durations in minutes for the previous and upcoming
+        10-minute windows. Feature names match random_forest_train.py.
+        """
+        sample = pd.DataFrame([{
+            fc.SOIL_MOISTURE: soil_moisture_percentage,
+            fc.WEATHER_TEMPERATURE: air_temperature_celsius,
+            fc.WEATHER_HUMIDITY: air_relative_humidity_percentage,
+            fc.IRRIGATION_PAST_10M: irrigation_last_10m,
+            fc.IRRIGATION_DURATION_MINUTES: irrigation_duration_minutes,
+            fc.SOIL_CHANGE_10M: soil_moisture_change_last_10m,
+        }])
+
+        model_features = self.model.feature_names_in_
+        print(self.model.predict(sample[model_features])[0])
+        return self.model.predict(sample[model_features])[0]
 
 
     def predict_soil_moisture(
@@ -52,18 +79,18 @@ class IrrigationHandler:
         10 minutes based on the provided features.
         """
         sample = pd.DataFrame([{
-            fc.SOIL_MOISTURE_PERCENTAGE: soil_moisture_pct,
+            fc.SOIL_MOISTURE: soil_moisture_pct,
             fc.SOIL_CHANGE_10M: soil_change_10m,
-            fc.AIR_TEMP_C: air_temp_c,
-            fc.AIR_RELATIVE_HUMIDITY_PERCENTAGE: air_rh_pct,
-            fc.IRRIGATION_10M: irrigation_10m,
+            fc.WEATHER_TEMPERATURE: air_temp_c,
+            fc.WEATHER_HUMIDITY: air_rh_pct,
+            fc.IRRIGATION_PAST_10M: irrigation_10m,
         }])
 
         model_features = self.model.feature_names_in_
         legacy_names = {
-            fc.SOIL_MOISTURE_PERCENTAGE: "soil_moisture_pct",
-            fc.AIR_TEMP_C: "air_temp_c",
-            fc.AIR_RELATIVE_HUMIDITY_PERCENTAGE: "air_rh_pct",
+            fc.SOIL_MOISTURE: "soil_moisture_pct",
+            fc.WEATHER_TEMPERATURE: "air_temp_c",
+            fc.WEATHER_HUMIDITY: "air_rh_pct",
         }
         sample = sample.rename(columns={
             current: legacy for current, legacy in legacy_names.items()
@@ -82,22 +109,15 @@ class IrrigationHandler:
         will be ignored otherwise.
         """
         current_time = datetime.now(timezone.utc)
+        irrigation_data_handler.fill_expired_irrigation(current_time)
         sample_slot = TimeHelper.floor_to_nearest_ten_minutes(current_time)
         if sample_slot != self.current_sample_slot:
             self.current_sample_slot = sample_slot
             self.current_unsampled_nodes.clear()
             self.has_handled_this_timestamp = False
 
-        # All unsampled nodes in the current window will be recorded as 0 irrigation.
-        current_minute_in_window = current_time.minute % 10
-        if current_minute_in_window > self.sample_timeout_minutes:
-            if not self.has_handled_this_timestamp:
-                return
-            
-            for remaining_node in self.current_unsampled_nodes:
-                telemetry_handler.record_irrigation_data(0, node_id=remaining_node)
+        if TimeHelper.is_window_expired(sample_slot, current_time, self.sample_timeout_minutes):
             self.current_unsampled_nodes.clear()
-            self.has_handled_this_timestamp = False
             return
 
         # Check if enough time has passed since the last handling to avoid excessive sampling        
@@ -108,10 +128,12 @@ class IrrigationHandler:
         
         self.last_handling = now
         
-        # Rebuild the sampling list if not already
-        if not self.has_handled_this_timestamp:
-            self.current_unsampled_nodes = AcquiredNodeHandler.read_all_nodes()
-            self.has_handled_this_timestamp = True
+        # Refresh each pass so newly discovered nodes are included. Persisted
+        # decisions are skipped, including after restarting within a window.
+        self.current_unsampled_nodes = {
+            node_id for node_id in operation_log_manager.read_all_recorded_nodes()
+            if not irrigation_data_handler.has_irrigation_duration(node_id, sample_slot)
+        }
 
         # Sample all nodes
         sampling = self.current_unsampled_nodes.copy()
@@ -135,67 +157,70 @@ class IrrigationHandler:
             bool: True if the irrigation was handled successfully, False otherwise.
         """
         
+        print(f"Handling irrigation for node: {node_id}")
+        
         if node_id is None:
             return False
         
-        data = telemetry_handler.get_irrigation_data(node_id=node_id)
+        target_sample_time = self.current_sample_slot
+        if target_sample_time is None or target_sample_time != TimeHelper.get_current_slot():
+            return False
+        if TimeHelper.is_window_expired(target_sample_time, datetime.now(timezone.utc), self.sample_timeout_minutes):
+            return False
+        if irrigation_data_handler.has_irrigation_duration(node_id, target_sample_time):
+            return True
+        data = irrigation_data_handler.get_irrigation_data(node_id=node_id, timestamp=target_sample_time)
         if data is None:
+            print(f"Cannot fetch irrigation data: {irrigation_data_handler.last_fetch_error}")
             return False
 
         # Unmatched timestamp
         sample_time = TimeHelper.process_time(data[fc.TIMESTAMP])
-        target_sample_time = TimeHelper.get_current_slot()
-        if sample_time is None or sample_time.astimezone(timezone.utc) != target_sample_time:
+        if sample_time is None or sample_time != target_sample_time:
             return False
 
         # Record current moisture and predict future one
-        current_soil_moisture = data[fc.SOIL_MOISTURE_PERCENTAGE]
-        predicted_soil_moisture = self.predict_soil_moisture(
-            data[fc.SOIL_MOISTURE_PERCENTAGE],
-            data[fc.SOIL_CHANGE_10M],
-            data[fc.AIR_TEMP_C],
-            data[fc.AIR_RELATIVE_HUMIDITY_PERCENTAGE],
-            data[fc.IRRIGATION_10M]
+        current_soil_moisture = data[fc.SOIL_MOISTURE]
+        next_moisture_without_irrigation = self.predict(
+            soil_moisture_percentage=current_soil_moisture,
+            soil_moisture_change_last_10m=data[fc.SOIL_CHANGE_10M],
+            air_temperature_celsius=data[fc.WEATHER_TEMPERATURE],
+            air_relative_humidity_percentage=data[fc.WEATHER_HUMIDITY],
+            irrigation_last_10m=data[fc.IRRIGATION_PAST_10M],
+            irrigation_duration_minutes=0.0
+        )
+        plant_profile = operation_log_manager.get_node_profile(node_id)
+
+        skip_irrigation = (
+            current_soil_moisture > plant_profile.fc or
+            next_moisture_without_irrigation > plant_profile.fc
+        )
+
+        if skip_irrigation:
+            telemetry_handler.record_irrigation_data(0, node_id=node_id, timestamp=target_sample_time)
+            return True
+
+        # Determine the irrigation duration needed to reach the target soil moisture
+        target_duration = self.max_irrigation_duration
+        for duration in self.irrigation_sampling_duration:
+            predicted_moisture = self.predict(
+                soil_moisture_percentage=current_soil_moisture,
+                soil_moisture_change_last_10m=data[fc.SOIL_CHANGE_10M],
+                air_temperature_celsius=data[fc.WEATHER_TEMPERATURE],
+                air_relative_humidity_percentage=data[fc.WEATHER_HUMIDITY],
+                irrigation_last_10m=data[fc.IRRIGATION_PAST_10M],
+                irrigation_duration_minutes=duration
             )
-        
-        # Saturated moisture range. No irrigation needed.
-        if current_soil_moisture >= self.plant_profile[fc.SATURATION_POINT]:
-            print(f"Current soil moisture {current_soil_moisture:.2f}% is above saturation threshold. No irrigation needed.")
-            telemetry_handler.record_irrigation_data(0, node_id=node_id)
-            return True
-        
-        # Excessive moisture range. No irrigation needed.
-        if current_soil_moisture >= self.plant_profile[fc.FIELD_CAPACITY]:
-            print(f"Current soil moisture {current_soil_moisture:.2f}% is above field capacity threshold. No irrigation needed.")
-            telemetry_handler.record_irrigation_data(0, node_id=node_id)
-            return True
-        
-        # Dangerous moisture range. Irrigation is highly needed.
-        pwp = self.plant_profile[fc.PERMANENT_WILTING_POINT]
-        if current_soil_moisture <= pwp or predicted_soil_moisture <= pwp:
-            print(f"Predicted soil moisture {predicted_soil_moisture:.2f}% or current soil moisture {current_soil_moisture:.2f}% is below permanent wilting point. Irrigation needed.")
-            self.send_irrigation_command(node_id, self.default_irrigation_minutes)
-            telemetry_handler.record_irrigation_data(self.default_irrigation_minutes, node_id=node_id)
-            return True
-        
-        # Stressed moisture ranged. Default or reduced irrigation depending on the predicted
-        # moisture.
-        madp = self.plant_profile[fc.MANAGEMENT_ALLOWED_DEPLETION_POINT]
-        if current_soil_moisture < madp:
-            print(f"Current soil moisture {current_soil_moisture:.2f}% is below management allowed depletion point. Irrigation needed.")
-            self.send_irrigation_command(node_id, self.default_irrigation_minutes)
-            telemetry_handler.record_irrigation_data(self.default_irrigation_minutes, node_id=node_id)
-            return True
-        
-        if predicted_soil_moisture < madp:
-            print(f"Predicted soil moisture {predicted_soil_moisture:.2f}% is below management allowed depletion point. Irrigation needed.")
-            self.send_irrigation_command(node_id, self.reduced_irrigation_minutes)
-            telemetry_handler.record_irrigation_data(self.reduced_irrigation_minutes, node_id=node_id)
-            return True
-        
-        # Optimal moisture
-        print(f"Predicted soil moisture {predicted_soil_moisture:.2f}% is optimal. No irrigation needed.")
-        telemetry_handler.record_irrigation_data(0, node_id=node_id)
+            if plant_profile.madp <= predicted_moisture <= plant_profile.fc:
+                target_duration = duration
+                break
+            
+        # Inference may finish after the window has changed; do not send a stale decision.
+        if TimeHelper.get_current_slot() != target_sample_time:
+            return False
+        if not telemetry_handler.record_irrigation_data(target_duration, node_id=node_id, timestamp=target_sample_time):
+            return False
+        self.send_irrigation_command(node_id, irrigation_minutes=target_duration)
         return True
     
     
@@ -221,7 +246,7 @@ class IrrigationHandler:
             print(f"Invalid irrigation duration: {irrigation_minutes} minutes. Command not sent.")
             return
 
-        duration_ms = irrigation_minutes * 60 * 1000
+        duration_ms = int(irrigation_minutes * 60 * 1000)
         if duration_ms > self.max_duration_ms:
             print(f"Requested irrigation duration {duration_ms} ms exceeds maximum allowed {self.max_duration_ms} ms. Command not sent.")
             return
@@ -229,7 +254,7 @@ class IrrigationHandler:
         command_proxy.send_command(
             node_id=node_id,
             action=ActionIndex.StartPump,
-            ttl_ms=60_000,
+            ttl_ms=300_000,
             duration_ms=duration_ms
         )
 

@@ -2,9 +2,9 @@ from time import monotonic
 from datetime import time, datetime, timezone
 from action_index import ActionIndex
 from command_proxy import command_proxy
-from acquired_node_handler import AcquiredNodeHandler
 from pathlib import Path
 from configparser import ConfigParser
+from operation_log_manager import operation_log_manager
 import json
 
 CONFIG_FILE = "config.cfg"
@@ -56,7 +56,7 @@ class CaptureHandler:
 
         print(f"Sending capture commands at {now.isoformat()}")
         
-        for node_id in AcquiredNodeHandler.read_all_nodes():
+        for node_id in operation_log_manager.read_all_recorded_nodes():
             command_proxy.send_command(node_id, action=ActionIndex.Capture, ttl_ms=60000, duration_ms=1234)
             
 capture_handler = CaptureHandler()
