@@ -232,7 +232,9 @@ void handlePowerButton() {
 
         case PowerButton::Action::DEEP_SLEEP:
 
-            Serial.println("[POWER] Stopping pump before deep sleep...");
+            Serial.println(
+                "[POWER] Stopping pump before deep sleep..."
+            );
 
             pumpController.stop();
 
@@ -243,11 +245,15 @@ void handlePowerButton() {
 
         case PowerButton::Action::OPEN_CONFIG:
 
-            Serial.println("[POWER] Stopping pump before opening portal...");
+            Serial.println(
+                "[POWER] Stopping pump before opening portal..."
+            );
 
             pumpController.stop();
 
-            Serial.println("[POWER] Opening configuration portal...");
+            Serial.println(
+                "[POWER] Opening configuration portal..."
+            );
 
             configPortal.open();
 
@@ -272,13 +278,11 @@ void handleCaptureCommand() {
         return;
     }
 
-    // Clear pending flag before processing.
     captureCommandPending = false;
 
     Serial.println();
     Serial.println("========== CAMERA COMMAND ==========");
 
-    // Check whether camera is processing another request.
     if (cameraClient.isBusy()) {
 
         Serial.println(
@@ -288,13 +292,11 @@ void handleCaptureCommand() {
         return;
     }
 
-    // Generate a new sequence for this capture.
     sampleSequence++;
 
     Serial.print("[CAMERA] Capture sequence: ");
     Serial.println(sampleSequence);
 
-    // Send capture request to ESP32-S3.
     if (!cameraClient.requestCapture(sampleSequence)) {
 
         Serial.println(
@@ -305,7 +307,7 @@ void handleCaptureCommand() {
     }
 
     Serial.println(
-        "[CAMERA] Capture request sent to ESP32-S3!"
+        "[CAMERA] Capture request sent to camera!"
     );
 
     Serial.println("====================================");
@@ -324,8 +326,6 @@ void handleCameraResponse() {
 
     if (cameraClient.hasImage()) {
 
-        // Keep the image in CameraUARTClient until
-        // MQTT is connected.
         if (!mqttClient.isConnected()) {
             return;
         }
@@ -335,7 +335,9 @@ void handleCameraResponse() {
         if (cameraClient.takeImage(image)) {
 
             Serial.println();
-            Serial.println("========== CAMERA IMAGE RECEIVED ==========");
+            Serial.println(
+                "========== CAMERA IMAGE RECEIVED =========="
+            );
 
             Serial.print("[CAMERA] Sample sequence: ");
             Serial.println(image.sampleSeq);
@@ -347,7 +349,6 @@ void handleCameraResponse() {
             Serial.print("[MQTT] Image topic: ");
             Serial.println(imageTopic);
 
-            // Publish JPEG image to MQTT.
             bool published = mqttClient.publishImage(
                 image.sampleSeq,
                 image.data,
@@ -367,14 +368,17 @@ void handleCameraResponse() {
                 );
             }
 
-            // Release image memory.
             free(image.data);
 
             image.data = nullptr;
 
-            Serial.println("[CAMERA] Image memory released!");
+            Serial.println(
+                "[CAMERA] Image memory released!"
+            );
 
-            Serial.println("===========================================");
+            Serial.println(
+                "==========================================="
+            );
         }
     }
 
@@ -387,8 +391,6 @@ void handleCameraResponse() {
         Serial.println();
         Serial.println("[CAMERA] Capture failed!");
 
-        // Reset parser so that the next request
-        // can be processed.
         cameraClient.reset();
     }
 }
@@ -520,13 +522,10 @@ bool connectWiFi() {
         millis() - startTime < WIFI_CONNECT_TIMEOUT_MS
     ) {
 
-        // Handle button while waiting for Wi-Fi.
         handlePowerButton();
 
-        // Update status LED.
         statusLed.update(false);
 
-        // Keep pump scheduler running.
         pumpController.update();
 
         if (millis() - lastDotTime >= 250) {
@@ -587,7 +586,9 @@ void initializeNTP() {
         SECONDARY_NTP_SERVER
     );
 
-    Serial.println("[NTP] Waiting for time synchronization...");
+    Serial.println(
+        "[NTP] Waiting for time synchronization..."
+    );
 
     uint32_t startTime = millis();
 
@@ -607,11 +608,15 @@ void initializeNTP() {
 
     if (std::time(nullptr) >= MIN_VALID_TIMESTAMP) {
 
-        Serial.println("[NTP] Time synchronized successfully.");
+        Serial.println(
+            "[NTP] Time synchronized successfully."
+        );
     }
     else {
 
-        Serial.println("[NTP] Time synchronization failed!");
+        Serial.println(
+            "[NTP] Time synchronization failed!"
+        );
 
         Serial.println(
             "[NTP] Commands will be rejected until time is valid."
@@ -704,9 +709,10 @@ void setup() {
     // ---------------------------------------------
 
     Serial.println();
-    Serial.println("========== CAMERA UART INITIALIZATION ==========");
+    Serial.println(
+        "========== CAMERA UART INITIALIZATION =========="
+    );
 
-    // Increase RX buffer BEFORE HardwareSerial.begin().
     cameraSerial.setRxBufferSize(
         CAMERA_UART_RX_BUFFER_SIZE
     );
@@ -757,7 +763,9 @@ void setup() {
     // ---------------------------------------------
 
     Serial.println();
-    Serial.println("========== CONFIGURATION INITIALIZATION ==========");
+    Serial.println(
+        "========== CONFIGURATION INITIALIZATION =========="
+    );
 
     if (!configManager.begin()) {
 
@@ -791,11 +799,25 @@ void setup() {
     Serial.println(" ms");
 
     // ---------------------------------------------
-    // 5. Initialize configuration portal.
+    // 5. Apply pump PWM configuration.
+    // ---------------------------------------------
+
+    pumpController.setPwmPercent(
+        config.pumpPwmPercent
+    );
+
+    Serial.print("[CONFIG] Pump PWM applied: ");
+    Serial.print(pumpController.getPwmPercent());
+    Serial.println("%");
+
+    // ---------------------------------------------
+    // 6. Initialize configuration portal.
     // ---------------------------------------------
 
     Serial.println();
-    Serial.println("========== CONFIGURATION PORTAL ==========");
+    Serial.println(
+        "========== CONFIGURATION PORTAL =========="
+    );
 
     configPortal.begin(&configManager);
 
@@ -806,7 +828,7 @@ void setup() {
     );
 
     // ---------------------------------------------
-    // 6. Initialize sensors.
+    // 7. Initialize sensors.
     // ---------------------------------------------
 
     Serial.println();
@@ -815,13 +837,13 @@ void setup() {
     sensorManager.begin();
 
     // ---------------------------------------------
-    // 7. Connect Wi-Fi.
+    // 8. Connect Wi-Fi.
     // ---------------------------------------------
 
     bool wifiConnected = connectWiFi();
 
     // ---------------------------------------------
-    // 8. Initialize NTP.
+    // 9. Initialize NTP.
     // ---------------------------------------------
 
     if (wifiConnected) {
@@ -829,19 +851,23 @@ void setup() {
     }
 
     // ---------------------------------------------
-    // 9. Initialize MQTT.
+    // 10. Initialize MQTT.
     // ---------------------------------------------
 
     initializeMQTT();
 
     // ---------------------------------------------
-    // 10. Initialize telemetry scheduler.
+    // 11. Initialize telemetry scheduler.
     // ---------------------------------------------
 
     lastTelemetryTime = millis();
 
     Serial.println();
     Serial.println("========== SYSTEM READY ==========");
+
+    Serial.print("[SYSTEM] Pump PWM: ");
+    Serial.print(pumpController.getPwmPercent());
+    Serial.println("%");
 
     if (!wifiConnected) {
 
