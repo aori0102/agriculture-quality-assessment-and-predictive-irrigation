@@ -17,7 +17,7 @@ from operation_log_manager import operation_log_manager
 
 class IrrigationHandler:
     def __init__(self):
-        cfg_path = Path(__file__).with_name("config.cfg")
+        cfg_path = Path(__file__).resolve().parents[1] / "config.cfg"
         cfg = ConfigParser()
 
         with cfg_path.open(encoding="utf-8-sig") as file:
@@ -27,13 +27,13 @@ class IrrigationHandler:
         self.current_sample_slot = None
         self.last_handling = monotonic()
         
-        self.sample_delay_seconds = cfg.getfloat("sampling", "sample_delay_seconds", fallback=1.0)
+        self.sample_delay_seconds = cfg.getfloat("irrigation_sampling", "sample_delay_seconds", fallback=1.0)
 
         self.irrigation_sampling_duration = json.loads(cfg.get("irrigation", "irrigation_sampling", fallback="[0.1, 0.5, 1.0, 2.0, 5.0, 8.0]"))
         self.max_irrigation_duration = self.irrigation_sampling_duration[-1]
         self.irrigation_sampling_duration = self.irrigation_sampling_duration[:-1]
                 
-        self.model = load_or_train_initial_model(cfg_path.parent, operation_log_manager)
+        self.model = load_or_train_initial_model(Path(__file__).resolve().parent, operation_log_manager)
             
         
     def predict(

@@ -11,15 +11,15 @@ from ultralytics.utils.plotting import Annotator, colors
 DEVICE = 0
 PLANT_CLASSES = {"ready", "germination", "young"}
 
-config_path = Path(__file__).resolve().with_name("config.cfg")
+config_path = Path(__file__).resolve().parents[1] / "config.cfg"
 config = ConfigParser()
 with config_path.open(encoding="utf-8-sig") as config_file:
     config.read_file(config_file)
 
-output_dir = config_path.parent / config.get("output", "output_dir")
+output_dir = config_path.parent / config.get("vision_output", "output_dir")
 
-detector = YOLO(config_path.parent / config.get("model", "detection_path"))
-classifier = YOLO(config_path.parent / config.get("model", "classifier_path"))
+detector = YOLO(config_path.parent / config.get("vision_model", "detection_path"))
+classifier = YOLO(config_path.parent / config.get("vision_model", "classifier_path"))
 
 
 def predict_jpeg(jpeg: bytes):

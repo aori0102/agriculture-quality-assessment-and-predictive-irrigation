@@ -19,10 +19,11 @@ class LifecycleTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name) / "IrrigationPrediction"
+        self.root.mkdir()
         self.models = self.root / 'models'
         self.models.mkdir()
-        (self.root / 'config.cfg').write_text('[model]\nmodel_path = models/irrigation_0.joblib\n')
+        (self.root.parent / 'config.cfg').write_text('[irrigation_model]\nmodel_path = IrrigationPrediction/models/irrigation_0.joblib\n[vision_model]\ndetection_path = ComputerVision/detector.pt\n')
         self.log = Mock()
 
     def files(self):
@@ -61,7 +62,7 @@ class LifecycleTests(unittest.TestCase):
         with patch.object(m, 'load_validated_model', side_effect=load), patch.object(m.subprocess, 'run') as run:
             self.assertIs(m.load_or_train_initial_model(self.root, self.log), model)
         run.assert_not_called()
-        self.assertIn('models/original.joblib', (self.root / 'config.cfg').read_text())
+        self.assertIn('IrrigationPrediction/models/original.joblib', (self.root.parent / 'config.cfg').read_text())
 
     def test_legacy_paths_resolve_inside_models(self):
         self.assertEqual(m.resolve_model_path(self.root, 'retrained_models/old.joblib'),
@@ -70,11 +71,11 @@ class LifecycleTests(unittest.TestCase):
                          self.models / 'original.joblib')
 
     def test_training_failure_keeps_config_and_stops(self):
-        before = (self.root / 'config.cfg').read_bytes()
+        before = (self.root.parent / 'config.cfg').read_bytes()
         with patch.object(m.subprocess, 'run', side_effect=RuntimeError('training failed')):
             with self.assertRaisesRegex(RuntimeError, 'setup stopped'):
                 m.load_or_train_initial_model(self.root, self.log)
-        self.assertEqual(before, (self.root / 'config.cfg').read_bytes())
+        self.assertEqual(before, (self.root.parent / 'config.cfg').read_bytes())
         self.assertEqual(list(self.models.iterdir()), [])
         self.log.clear_model_status.assert_not_called()
 
@@ -100,7 +101,8 @@ class LifecycleTests(unittest.TestCase):
             retrainer._activate()
         self.assertIs(retrainer.irrigation.model, model)
         self.assertEqual(len(list(self.models.glob('irrigation_*.joblib'))), 3)
-        self.assertIn('irrigation_5.joblib', (self.root / 'config.cfg').read_text())
+        self.assertIn('irrigation_5.joblib', (self.root.parent / 'config.cfg').read_text())
+        self.assertIn('detection_path = ComputerVision/detector.pt', (self.root.parent / 'config.cfg').read_text())
 
     def test_real_bootstrap_from_base_datasets_and_reload(self):
         for name in ['random_forest_train.py', 'field_constants.py']:
