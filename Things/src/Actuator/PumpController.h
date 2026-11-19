@@ -5,8 +5,11 @@
 
 class PumpController {
 public:
-    // Maximum allowed pump duration: 60 seconds.
     static constexpr uint32_t MAX_DURATION_MS = 60000;
+
+    static constexpr uint32_t PWM_FREQUENCY = 5000;
+    static constexpr uint8_t PWM_RESOLUTION = 8;
+    static constexpr uint8_t DEFAULT_PWM_PERCENT = 100;
 
     PumpController(
         uint8_t enablePin,
@@ -16,15 +19,16 @@ public:
 
     void begin();
 
-    // Start pump for the specified duration.
-    // Returns false if duration is invalid or pump is already running.
     bool start(uint32_t durationMs);
 
-    // Stop pump immediately.
     void stop();
 
-    // Must be called continuously inside loop().
     void update();
+
+    // Set pump speed from 0 to 100 percent.
+    void setPwmPercent(uint8_t percent);
+
+    uint8_t getPwmPercent() const;
 
     bool isRunning() const;
 
@@ -35,11 +39,17 @@ private:
     uint8_t m_input1Pin;
     uint8_t m_input2Pin;
 
+    uint8_t m_pwmPercent = DEFAULT_PWM_PERCENT;
+
     bool m_isRunning = false;
+    bool m_pwmInitialized = false;
 
     uint32_t m_startTime = 0;
     uint32_t m_durationMs = 0;
 
     void turnMotorOn();
     void turnMotorOff();
+
+    uint32_t getPwmDuty() const;
+    void writePwmDuty(uint32_t duty);
 };

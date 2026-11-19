@@ -7,7 +7,6 @@ struct DeviceConfig {
     String wifiSSID;
     String wifiPassword;
 
-    // Unique identifier of the Edge device
     String edgeId;
 
     String mqttHost;
@@ -16,6 +15,9 @@ struct DeviceConfig {
     String mqttPassword;
 
     uint32_t telemetryIntervalMs;
+
+    // Pump PWM configuration: 0 - 100%.
+    uint8_t pumpPwmPercent = 100;
 };
 
 class DeviceConfigManager {
