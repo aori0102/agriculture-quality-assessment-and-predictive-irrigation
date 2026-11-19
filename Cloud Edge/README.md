@@ -235,3 +235,29 @@ connections. Edit the node IDs, Blynk regional hosts and referenced Auth Token
 variables, then run the command again. Existing `.env` files are never overwritten.
 `--check` performs the same first-run template creation. Invalid existing settings
 report the configuration path for correction.
+
+## Standalone Cloud end-to-end demo
+
+From `Cloud Edge/` with the shared virtual environment activated:
+
+```powershell
+python -m run_cloud_demo
+python -m run_cloud_demo --node-id esp01 --duration 180 --require-command
+python -m run_cloud_demo --dry-run
+```
+
+This independent script uses the first device from repository-root `.env` by default.
+It sends synthetic sensor/AI values every 5 seconds for 120 seconds. Use `--interval`
+to change cadence and `--duration 0` to keep running until Ctrl+C.
+After `[MQTT READY]`, toggle Blynk `pump_command` (V3). The demo changes its simulated
+pump and reports simulated status to V4. All data and confirmations are fake.
+No AI app, model, ESP32 broker, command proxy or operational logs are loaded/modified.
+The CloudClient/Blynk transport and credentials are shared library/configuration only.
+Stop any other Edge process using the same Blynk token before starting the demo.
+Live runs update the selected device's dashboard; prefer a test device binding.
+`--require-command` requires a received unexpired V3 command for a successful exit.
+Without it, uplink/MQTT success can finish with "Downlink not verified".
+
+Validation: six mocked tests cover uplink/downlink, expired/missing commands, error
+handling, cleanup, fake value ranges and dry-run isolation. Live Cloud operation
+must be checked by running the script and observing the dashboard.
