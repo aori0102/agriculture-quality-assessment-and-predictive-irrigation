@@ -1,3 +1,4 @@
+from collections import Counter
 from configparser import ConfigParser
 from datetime import datetime, timezone
 from pathlib import Path
@@ -57,7 +58,7 @@ def predict_jpeg(jpeg: bytes):
     return detections, classifications
 
 
-def process_image(node_id: str, jpeg: bytes) -> Path:
+def process_image(node_id: str, jpeg: bytes, *, on_result=None) -> Path:
     """Save and return the image with detection boxes and NPK labels."""
     detections, classifications = predict_jpeg(jpeg)
     boxes = detections.boxes.cpu()
@@ -98,4 +99,8 @@ def process_image(node_id: str, jpeg: bytes) -> Path:
         f"Image from {node_id}: {len(boxes)} detections, "
         f"{len(classifications)} plants classified. Saved to {output_path}"
     )
+    counts = Counter(result["label"] for result in classifications.values())
+    status = "; ".join(f"{label}: {count}" for label, count in sorted(counts.items()))
+    if on_result is not None:
+        on_result(node_id=node_id, plant_status=status or "No plants classified")
     return output_path

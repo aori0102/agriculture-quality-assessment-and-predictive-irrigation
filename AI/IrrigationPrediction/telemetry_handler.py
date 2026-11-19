@@ -1,3 +1,4 @@
+from cloud_reporter import cloud_reporter
 import json
 import paho.mqtt.client as mqtt
 from .irrigation_data_handler import irrigation_data_handler
@@ -69,6 +70,9 @@ class TelemetryHandler:
             return False
         timestamp = TimeHelper.floor_to_nearest_ten_minutes(timestamp.astimezone(timezone.utc))
         
+        if not isinstance(quality, dict):
+            return False
+
         if "soil" not in quality or quality["soil"] == "invalid":
             print(f"Invalid or missing soil moisture sensor reading quality.")
             return False
@@ -95,6 +99,10 @@ class TelemetryHandler:
             return False
 
         operation_log_manager.log_node(node_id)  # Record the node ID as acquired
+        cloud_reporter.submit(
+            "send_telemetry", node_id=node_id, soil_index_pct=soil_moisture_pct,
+            temperature_c=air_temp_c, air_humidity_pct=humidity_pct,
+        )
         return True
     
 

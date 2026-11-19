@@ -38,7 +38,8 @@ class LauncherTests(unittest.TestCase):
                 check_edge_config(path)
 
     def test_check_does_not_import_ai_or_connect(self):
-        with patch('cloud_edge.launcher.check_edge_config'), \
+        with patch('cloud_edge.launcher.ensure_env_file', return_value=False), \
+             patch('cloud_edge.launcher.check_edge_config'), \
              patch('cloud_edge.launcher.load_device_bindings', return_value=()), \
              patch('cloud_edge.launcher.importlib.import_module') as imports, \
              patch('cloud_edge.launcher.run_with_clients') as run:
@@ -58,3 +59,46 @@ class LauncherTests(unittest.TestCase):
                 client_factory=Mock(return_value=client), pump_backend=object(),
                 dispatcher_factory=Mock(return_value=dispatcher))
         self.assertEqual(events, ['dispatcher', 'client'])
+
+
+class EnvPlaceholderTests(unittest.TestCase):
+    def test_missing_env_created_once_and_never_overwritten(self):
+        from cloud_edge.config import ensure_env_file
+        from dotenv import dotenv_values
+        import json
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / '.env'
+            with patch('cloud_edge.config.ENV_FILE', path):
+                self.assertTrue(ensure_env_file())
+                values = dotenv_values(path)
+                entries = json.loads(values['BLYNK_DEVICES_JSON'])
+                self.assertTrue(entries)
+                self.assertEqual(values[entries[0]['auth_token_env']], '')
+                path.write_text('PRIVATE_TOKEN=keep-this-exactly\n', encoding='utf-8')
+                before = path.read_bytes()
+                self.assertFalse(ensure_env_file())
+                self.assertEqual(path.read_bytes(), before)
+
+    def test_first_start_logs_path_and_stops_before_clients_or_ai(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / '.env'
+            output = StringIO()
+            with patch('cloud_edge.config.ENV_FILE', path), \
+                 patch('cloud_edge.launcher.ENV_FILE', path), \
+                 patch('cloud_edge.launcher.load_device_bindings') as load, \
+                 patch('cloud_edge.launcher.importlib.import_module') as imports, \
+                 redirect_stderr(output):
+                self.assertEqual(main([]), 2)
+            self.assertTrue(path.exists())
+            self.assertIn(str(path), output.getvalue())
+            self.assertIn('Auth Token', output.getvalue())
+            load.assert_not_called()
+            imports.assert_not_called()
+
+    def test_env_create_error_is_reported_without_startup(self):
+        output = StringIO()
+        with patch('cloud_edge.launcher.ensure_env_file', side_effect=PermissionError()), \
+             patch('cloud_edge.launcher.load_device_bindings') as load, redirect_stderr(output):
+            self.assertEqual(main([]), 2)
+        load.assert_not_called()
+        self.assertIn('Check configuration in:', output.getvalue())

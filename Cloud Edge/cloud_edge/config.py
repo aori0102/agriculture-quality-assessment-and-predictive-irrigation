@@ -15,6 +15,19 @@ from dotenv import dotenv_values
 ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
 
+ENV_PLACEHOLDER = '# Fill in these values, then restart: python -m run_edge\n# node_id must match the ESP32 MQTT node_id.\n# server must be the Blynk device regional hostname.\n# auth_token_env names the variable containing that device\'s Auth Token.\nBLYNK_DEVICES_JSON=\'[{"node_id":"esp01","server":"sgp1.blynk.cloud","auth_token_env":"BLYNK_ESP01_TOKEN"}]\'\nBLYNK_ESP01_TOKEN=\n\n# Add one entry and a separate token variable for each additional Blynk device.\n# Keep this file private; do not commit real tokens.\n'
+
+
+def ensure_env_file() -> bool:
+    """Create the startup template exclusively; never overwrite an existing file."""
+    try:
+        with ENV_FILE.open("x", encoding="utf-8") as stream:
+            stream.write(ENV_PLACEHOLDER)
+    except FileExistsError:
+        return False
+    return True
+
+
 @dataclass(frozen=True)
 class CloudConfig:
     """Immutable Blynk settings; construction raises ValueError on invalid input.
