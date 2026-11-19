@@ -1,11 +1,8 @@
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import os
-AI_ROOT = Path(os.environ.get('EDGE_AI_PATH', str(Path(__file__).resolve().parent)))
-if not (AI_ROOT / 'time_helper.py').exists():
-    AI_ROOT = Path('D:/Uni/IoT/Final/AI')
-sys.path.append(str(AI_ROOT))
+AI_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = AI_ROOT.parent
+sys.path.insert(0, str(AI_ROOT))
 import unittest
 from unittest.mock import Mock
 from datetime import datetime, timedelta, timezone
@@ -63,9 +60,9 @@ class ReporterTests(unittest.TestCase):
 class WiringTests(unittest.TestCase):
     def load_functions(self, name, namespace):
         import ast
-        source = Path(__file__).with_name(name)
+        source = AI_ROOT / name
         if not source.exists():
-            source = Path(__file__).parent / 'IrrigationPrediction' / name
+            source = AI_ROOT / 'IrrigationPrediction' / name
         tree = ast.parse(source.read_text(encoding='utf-8-sig'))
         tree.body = [n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.ClassDef))]
         exec(compile(tree, str(source), 'exec'), namespace)
@@ -131,10 +128,7 @@ class LauncherWiringTests(unittest.TestCase):
     def test_reporter_lifecycle_with_clients(self):
         import ast
         from contextlib import ExitStack
-        root=Path(__file__).resolve().parent
-        source=root/'launcher.py'
-        if not source.exists():
-            source=root.parent/'Cloud Edge/cloud_edge/launcher.py'
+        source = PROJECT_ROOT / 'Cloud Edge' / 'cloud_edge' / 'launcher.py'
         tree=ast.parse(source.read_text(encoding='utf-8-sig'))
         tree.body=[n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='run_with_clients']
         ns=dict(ExitStack=ExitStack,CloudClient=Mock(),PumpDispatcher=Mock())
