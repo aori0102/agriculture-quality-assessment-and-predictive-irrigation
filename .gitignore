@@ -228,3 +228,5 @@ yolov8x-cls.pt
 
 # Runtime files and folders
 /AI/ComputerVision/output/
+/AI/IrrigationPrediction/models/
+/AI/IrrigationPrediction/data_log.csv
