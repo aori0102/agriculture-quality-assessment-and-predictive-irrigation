@@ -221,3 +221,17 @@ saved-versus-active semantics, metadata storage, and the adapter API.
 The launcher also forwards V3 requests to the existing AI enable/disable
 interfaces. See [pump-request wiring](PUMP_COMMANDS.md). Success verifies the saved
 irrigation flag; it does not update V4 or confirm physical pump execution.
+
+## Outbound data and device events
+
+The combined launcher now forwards accepted telemetry, AI results and confirmed pump events using a background HTTP worker. See [Cloud uploads and events](../AI/CLOUD_UPLOADS.md) for routing, configuration and verification details.
+
+
+## First-run configuration template
+
+If the repository-root `.env` is missing, `python -m run_edge` creates a placeholder
+file and prints its absolute path, then exits before AI initialization or network
+connections. Edit the node IDs, Blynk regional hosts and referenced Auth Token
+variables, then run the command again. Existing `.env` files are never overwritten.
+`--check` performs the same first-run template creation. Invalid existing settings
+report the configuration path for correction.

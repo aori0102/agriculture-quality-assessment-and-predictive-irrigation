@@ -1,3 +1,4 @@
+from cloud_reporter import cloud_reporter
 from .model_retrainer import load_or_train_initial_model
 import pandas as pd
 import paho.mqtt.client as mqtt
@@ -176,6 +177,10 @@ class IrrigationHandler:
             air_relative_humidity_percentage=data[fc.WEATHER_HUMIDITY],
             irrigation_last_10m=data[fc.IRRIGATION_PAST_10M],
             irrigation_duration_minutes=0.0
+        )
+        cloud_reporter.submit(
+            "send_ai_results", node_id=node_id,
+            predicted_moisture_pct=float(next_moisture_without_irrigation),
         )
         plant_profile = operation_log_manager.get_node_profile(node_id)
 

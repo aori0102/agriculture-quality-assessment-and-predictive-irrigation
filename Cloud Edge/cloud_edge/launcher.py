@@ -10,7 +10,7 @@ import sys
 from threading import RLock
 
 from .client import CloudClient
-from .config import load_device_bindings
+from .config import load_device_bindings, ensure_env_file, ENV_FILE
 from .edge_profiles import EdgeProfileBackend
 from .edge_pump import EdgePumpBackend, PumpDispatcher
 
@@ -33,7 +33,7 @@ def check_edge_config(ai_directory: Path) -> None:
 
 
 def run_with_clients(edge_main, backend, bindings, *, client_factory=CloudClient,
-                     pump_backend=None, dispatcher_factory=PumpDispatcher):
+                     pump_backend=None, dispatcher_factory=PumpDispatcher, reporter=None):
     """One shared adapter across all devices; close even after partial startup."""
     with ExitStack() as resources:
         clients = {}
@@ -42,6 +42,9 @@ def run_with_clients(edge_main, backend, bindings, *, client_factory=CloudClient
             resources.callback(client.close)
             client.start()
             clients[binding.node_id] = client
+        if reporter is not None:
+            reporter.configure(clients)
+            resources.callback(reporter.close)
         if pump_backend is not None:
             dispatcher = dispatcher_factory(clients, pump_backend)
             resources.callback(dispatcher.close)  # Stop before closing clients.
@@ -55,6 +58,12 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     ai_directory = REPOSITORY / 'AI'
     try:
+        if ensure_env_file():
+            print(f"Created configuration template: {ENV_FILE}", file=sys.stderr)
+            print("Edit BLYNK_DEVICES_JSON (node_id/server) and fill in the referenced Auth Token "
+                  "variables in that file, then run python -m run_edge again. Startup stopped.",
+                  file=sys.stderr)
+            return 2
         check_edge_config(ai_directory)
         bindings = load_device_bindings()
     except Exception as error:
@@ -62,6 +71,7 @@ def main(argv=None) -> int:
         # are displayed. Unexpected parser failures must not expose config values.
         message = str(error) if isinstance(error, ValueError) else 'Configuration could not be loaded.'
         print(f'Startup configuration error: {message}', file=sys.stderr)
+        print(f'Check configuration in: {ENV_FILE}', file=sys.stderr)
         return 2
     if args.check:
         print('Configuration structure valid; model dependencies and live services were not checked.')
@@ -79,7 +89,8 @@ def main(argv=None) -> int:
     pump_backend = EdgePumpBackend(proxy.enable_irrigation_on_node, proxy.disable_irrigation_on_node,
                                    proxy.operation_log_manager.load_log, operation_lock=operation_lock)
     try:
-        run_with_clients(app.main, backend, bindings, pump_backend=pump_backend)
+        reporter = importlib.import_module('cloud_reporter').cloud_reporter
+        run_with_clients(app.main, backend, bindings, pump_backend=pump_backend, reporter=reporter)
     except KeyboardInterrupt:
         return 0
     except Exception:

@@ -1,3 +1,4 @@
+from cloud_reporter import cloud_reporter
 import json
 import paho.mqtt.client as mqtt
 from concurrent.futures import ThreadPoolExecutor
@@ -63,7 +64,10 @@ def handle_image(node_id: str, jpeg: bytes) -> None:
     try:
         from ComputerVision.image_prediction import process_image
 
-        process_image(node_id, jpeg)
+        process_image(
+            node_id, jpeg,
+            on_result=lambda **values: cloud_reporter.submit("send_ai_results", **values),
+        )
     except Exception as error:
         print(f"Could not process image from {node_id}: {error}")
 
@@ -88,6 +92,9 @@ def main():
     port = cfg.getint("mqtt", "port")
     topic_filter = cfg["mqtt"]["telemetry_filter"].format(edge_id=edge_id)
     image_filter = cfg["mqtt"]["image_filter"].format(edge_id=edge_id)
+    event_filter = cfg["mqtt"]["event_filter"].format(edge_id=edge_id)
+    event_qos = cfg.getint("mqtt", "event_qos", fallback=1)
+    subscriptions = [(topic_filter, 1), (image_filter, 1), (event_filter, event_qos)]
     test_topic = topic_filter.replace("+", "test_node", 1)
     test_sent = False
     ready = False
@@ -116,6 +123,12 @@ def main():
             return
         image_future = image_worker.submit(handle_image, node_id, bytes(message.payload))
 
+    def on_event(client, userdata, message):
+        if ready:
+            node_id = strip_topic_to_node_id(message.topic)
+            if not cloud_reporter.receive_pump_event(message, node_id):
+                print(f"Ignored invalid, expired or duplicate pump event on {message.topic}")
+
     def on_connect(client, userdata, flags, reason_code, properties):
         nonlocal ready, subscription_mid
         ready = False
@@ -125,7 +138,7 @@ def main():
             return
 
         print(f"Connected to {host}:{port}")
-        result, mid = client.subscribe([(topic_filter, 1), (image_filter, 1)])
+        result, mid = client.subscribe(subscriptions)
         if result != mqtt.MQTT_ERR_SUCCESS:
             print(f"Could not request subscriptions: {result}")
             return
@@ -142,12 +155,12 @@ def main():
         if mid != subscription_mid:
             return
         subscription_mid = None
-        if len(reason_codes) != 2 or any(code.is_failure for code in reason_codes):
+        if len(reason_codes) != len(subscriptions) or any(code.is_failure for code in reason_codes):
             print(f"Subscription rejected: {reason_codes}")
             return
 
         ready = True
-        print(f"Edge AI ready. Subscribed to {topic_filter} and {image_filter}")
+        print(f"Edge AI ready. Subscribed to {topic_filter} and {image_filter}, {event_filter}")
         if not test_sent:
             result = client.publish(
                 test_topic,
@@ -165,6 +178,7 @@ def main():
     client.on_disconnect = on_disconnect
     client.message_callback_add(topic_filter, on_telemetry)
     client.message_callback_add(image_filter, on_image)
+    client.message_callback_add(event_filter, on_event)
     irrigation_handler.configure_command_publisher(client, cfg)
     command_proxy.configure(client, cfg)
 
