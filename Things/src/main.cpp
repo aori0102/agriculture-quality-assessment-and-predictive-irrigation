@@ -33,7 +33,7 @@ StatusLed statusLed;
 PumpController pumpController(
     18, // L298N ENA
     19, // L298N IN1
-    21  // L298N IN2
+    27  // L298N IN2
 );
 
 
@@ -46,7 +46,7 @@ constexpr uint32_t CAMERA_UART_BAUD_RATE = 921600;
 constexpr int CAMERA_UART_RX_PIN = 16;
 constexpr int CAMERA_UART_TX_PIN = 17;
 
-constexpr size_t CAMERA_UART_RX_BUFFER_SIZE = 8192;
+constexpr size_t CAMERA_UART_RX_BUFFER_SIZE = 65536;
 
 HardwareSerial cameraSerial(2);
 

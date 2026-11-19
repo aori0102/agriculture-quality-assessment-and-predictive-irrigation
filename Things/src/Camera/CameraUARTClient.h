@@ -46,9 +46,9 @@ private:
     };
 
     static constexpr size_t HEADER_SIZE = 4;
-    static constexpr size_t MAX_IMAGE_SIZE = 256 * 1024;
+    static constexpr size_t MAX_IMAGE_SIZE = 1024 * 1024;
 
-    static constexpr uint32_t RESPONSE_TIMEOUT_MS = 10000;
+    static constexpr uint32_t RESPONSE_TIMEOUT_MS = 30000;
 
     HardwareSerial* m_serial = nullptr;
 
