@@ -11,9 +11,9 @@ CONFIG_FILE = "config.cfg"
 
 class CaptureHandler:
     def __init__(self):
-        config_path = Path(__file__).with_name(CONFIG_FILE)
+        config_path = Path(__file__).resolve().parents[1] / CONFIG_FILE
         config = ConfigParser()
-        with open(config_path, "r") as cfg_file:
+        with config_path.open(encoding="utf-8-sig") as cfg_file:
             config.read_file(cfg_file)
             
         self.capture_handling_interval = config.getint("capture", "capture_handling_interval_seconds", fallback=10)

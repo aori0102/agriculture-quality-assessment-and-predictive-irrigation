@@ -55,13 +55,13 @@ def resolve_model_path(directory: Path, stored: str) -> Path:
 
 def save_model_path(directory: Path, path: Path) -> None:
     path = resolve_model_path(directory, str(path))
-    config_path = directory / "config.cfg"
+    config_path = directory.parent / "config.cfg"
     config = ConfigParser()
     with config_path.open(encoding="utf-8-sig") as file:
         config.read_file(file)
-    if not config.has_section("model"):
-        config.add_section("model")
-    config["model"]["model_path"] = path.resolve().relative_to(directory.resolve()).as_posix()
+    if not config.has_section("irrigation_model"):
+        config.add_section("irrigation_model")
+    config["irrigation_model"]["model_path"] = path.resolve().relative_to(directory.resolve().parent).as_posix()
     text = StringIO()
     config.write(text)
     atomic_write_text(config_path, text.getvalue())
@@ -71,8 +71,8 @@ def prune_models(directory: Path, *protected: Path) -> None:
     """Keep three managed models, reserving slots for active/pending models."""
     try:
         config = ConfigParser()
-        config.read(directory / "config.cfg", encoding="utf-8-sig")
-        active = config.get("model", "model_path", fallback="")
+        config.read(directory.parent / "config.cfg", encoding="utf-8-sig")
+        active = config.get("irrigation_model", "model_path", fallback="")
         keep = {path.resolve() for path in protected}
         if active:
             keep.add(resolve_model_path(directory, active))
@@ -96,9 +96,9 @@ def prune_models(directory: Path, *protected: Path) -> None:
 def load_or_train_initial_model(directory: Path, log):
     """Block startup until a validated model is available; fail if training fails."""
     config = ConfigParser()
-    with (directory / "config.cfg").open(encoding="utf-8-sig") as file:
+    with (directory.parent / "config.cfg").open(encoding="utf-8-sig") as file:
         config.read_file(file)
-    configured = config.get("model", "model_path", fallback="")
+    configured = config.get("irrigation_model", "model_path", fallback="")
     candidates = []
     if configured:
         try:
@@ -112,7 +112,7 @@ def load_or_train_initial_model(directory: Path, log):
         except Exception as error:
             print(f"Cannot load irrigation model {path.name}: {error}")
             continue
-        relative_path = path.relative_to(directory.resolve()).as_posix()
+        relative_path = path.relative_to(directory.resolve().parent).as_posix()
         if relative_path != configured:
             save_model_path(directory, path)
         return model
