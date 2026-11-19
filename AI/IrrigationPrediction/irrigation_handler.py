@@ -1,4 +1,4 @@
-import joblib
+from .model_retrainer import load_or_train_initial_model
 import pandas as pd
 import paho.mqtt.client as mqtt
 import json
@@ -32,8 +32,7 @@ class IrrigationHandler:
         self.max_irrigation_duration = self.irrigation_sampling_duration[-1]
         self.irrigation_sampling_duration = self.irrigation_sampling_duration[:-1]
                 
-        model_path = cfg_path.parent / cfg.get("model", "model_path")
-        self.model = joblib.load(model_path)
+        self.model = load_or_train_initial_model(cfg_path.parent, operation_log_manager)
             
         
     def predict(

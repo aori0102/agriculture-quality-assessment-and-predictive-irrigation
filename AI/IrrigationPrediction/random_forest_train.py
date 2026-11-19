@@ -169,7 +169,8 @@ def main() -> None:
         else "irrigation_rf_10m_with_delta.joblib"
     )
     
-    output = args.output or SCRIPT_DIR / default_name
+    output = args.output or SCRIPT_DIR / "models" / default_name
+    output.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(model, output)
     print(f"Saved model: {output}")
     
