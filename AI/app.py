@@ -9,6 +9,9 @@ from ComputerVision.capture_handler import capture_handler
 from IrrigationPrediction.telemetry_handler import telemetry_handler
 from IrrigationPrediction.irrigation_handler import irrigation_handler
 from command_proxy import command_proxy
+from IrrigationPrediction.model_retrainer import ModelRetrainer
+from IrrigationPrediction.irrigation_data_handler import irrigation_data_handler
+from operation_log_manager import operation_log_manager
 
 CONFIG_FILE = "config.cfg"
 
@@ -90,6 +93,10 @@ def main():
     ready = False
     subscription_mid = None
     image_future = None
+    retrainer = ModelRetrainer(
+        operation_log_manager, irrigation_handler, irrigation_data_handler.data_path,
+        debug_hourly=cfg.getboolean("retrain", "debug_hourly", fallback=False),
+    )
     image_worker = ThreadPoolExecutor(max_workers=1)
 
     def on_telemetry(client, userdata, message: mqtt.MQTTMessage):
@@ -98,7 +105,7 @@ def main():
 
     def on_image(client, userdata, message: mqtt.MQTTMessage):
         nonlocal image_future
-        if not ready:
+        if not ready or retrainer.waiting_for_swap:
             return
         node_id = strip_topic_to_node_id(message.topic, "image")
         if not node_id:
@@ -187,6 +194,8 @@ def main():
                 continue
 
             if ready and client.is_connected():
+                if retrainer.tick(can_swap=image_future is None or image_future.done()):
+                    continue
                 irrigation_handler.loop()
                 capture_handler.loop()
     except KeyboardInterrupt:
@@ -195,7 +204,10 @@ def main():
         try:
             client.disconnect()
         finally:
-            image_worker.shutdown()
+            try:
+                retrainer.close()
+            finally:
+                image_worker.shutdown()
 
 
 if __name__ == "__main__":

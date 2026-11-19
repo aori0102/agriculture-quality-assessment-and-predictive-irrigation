@@ -123,6 +123,8 @@ def main() -> None:
     parser.add_argument("--train", type=Path, default=DATA_DIR / "train_data.csv")
     parser.add_argument("--test", type=Path, default=DATA_DIR / "test_data.csv")
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--jobs", type=int, default=-1)
+    parser.add_argument("--no-plot", action="store_true")
     parser.add_argument(
         "--without-delta",
         action="store_true",
@@ -149,7 +151,7 @@ def main() -> None:
                 max_depth=10,
                 min_samples_leaf=10,
                 random_state=42,
-                n_jobs=-1,
+                n_jobs=args.jobs,
             ),
         ),
     ])
@@ -159,7 +161,7 @@ def main() -> None:
 
     model.fit(train[features], train[TARGET])
     predictions = model.predict(test[features])
-    report_test_results(test, model.predict(test[features]))
+    report_test_results(test, predictions)
 
     default_name = (
         "irrigation_rf_10m_without_delta.joblib"
@@ -167,10 +169,14 @@ def main() -> None:
         else "irrigation_rf_10m_with_delta.joblib"
     )
     
-    output = args.output or SCRIPT_DIR / default_name
+    output = args.output or SCRIPT_DIR / "models" / default_name
+    output.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(model, output)
     print(f"Saved model: {output}")
     
+    if args.no_plot:
+        return
+
     plot_path = output.with_name(f"{output.stem}_scatter.png")
     save_prediction_scatter(test, predictions, plot_path)
     print(f"Saved scatter plot: {plot_path}")
