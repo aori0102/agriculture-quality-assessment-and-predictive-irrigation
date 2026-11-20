@@ -125,9 +125,9 @@ def main():
 
     def on_event(client, userdata, message):
         if ready:
-            node_id = strip_topic_to_node_id(message.topic)
+            node_id = strip_topic_to_node_id(message.topic, "events")
             if not cloud_reporter.receive_pump_event(message, node_id):
-                print(f"Ignored invalid, expired or duplicate pump event on {message.topic}")
+                print(f"Ignored invalid, expired or duplicate device event on {message.topic}")
 
     def on_connect(client, userdata, flags, reason_code, properties):
         nonlocal ready, subscription_mid

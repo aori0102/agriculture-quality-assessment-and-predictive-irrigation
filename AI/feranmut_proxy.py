@@ -28,13 +28,13 @@ def update_node_profile(
     
 def enable_irrigation_on_node(node_id: str):
     """
-    Enable irrigation on a specific node.
+    Allow future automatic irrigation on this node.
     """
     operation_log_manager.log_irrigation_status(node_id=node_id, status=True)
     
     
 def disable_irrigation_on_node(node_id: str):
     """
-    Disable irrigation on a specific node.
+    Disable future automatic irrigation; do not stop an active pump.
     """
     operation_log_manager.log_irrigation_status(node_id=node_id, status=False)

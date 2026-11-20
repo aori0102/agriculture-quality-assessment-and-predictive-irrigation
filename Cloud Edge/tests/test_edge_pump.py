@@ -26,7 +26,7 @@ class PumpTests(unittest.TestCase):
         self.client = Client()
 
     def set_flag(self, node_id, value):
-        self.log['node_profile'][node_id]['irrigation_status'] = value
+        self.log['node_profile'][node_id]['auto_irrigation_enabled'] = value
 
     def request(self, value=True, node='one', lifetime=5):
         self.client.pending = PumpCommand._received(node, value, lifetime)
@@ -38,7 +38,7 @@ class PumpTests(unittest.TestCase):
         self.enable.assert_called_once_with(node_id='one')
         self.assertEqual(self.request(False).outcome, 'saved')
         self.disable.assert_called_once_with(node_id='one')
-        self.assertNotIn('irrigation_status', self.log['node_profile']['two'])
+        self.assertNotIn('auto_irrigation_enabled', self.log['node_profile']['two'])
 
     def test_unknown_invalid_flag_and_wrong_binding(self):
         self.assertEqual(self.request(node='unknown').outcome, 'rejected')

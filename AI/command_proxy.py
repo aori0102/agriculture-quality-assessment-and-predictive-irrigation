@@ -14,7 +14,7 @@ class CommandProxy:
         self.command_topic = config["mqtt"]["command_topic"]
         self.command_qos = config.getint("mqtt", "command_qos")
         self.command_retain = config.getboolean("mqtt", "command_retain")
-        self.max_pump_duration_ms = config.getint("pump", "max_duration_ms")
+        self.max_pump_duration_ms = min(config.getint("pump", "max_duration_ms"), 60_000)
         self.mqtt_client = client
 
     def send_command(

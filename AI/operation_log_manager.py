@@ -1,3 +1,13 @@
+from functools import wraps
+from threading import RLock
+
+def synchronized(method):
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        with self.lock:
+            return method(self, *args, **kwargs)
+    return wrapped
+
 import json
 from copy import deepcopy
 from tempfile import NamedTemporaryFile
@@ -32,6 +42,7 @@ def atomic_write_text(path: Path, text: str) -> None:
 
 class OperationLogManager:
     def __init__(self):
+        self.lock = RLock()
         config_path = Path(__file__).with_name(CONFIG_FILE)
         self.config = ConfigParser()
         self.config.read(config_path)
@@ -50,21 +61,31 @@ class OperationLogManager:
         return True
     
 
+    @synchronized
     def load_log(self) -> dict:
         if self.log_file_path.exists():
             with open(self.log_file_path, 'r', encoding='utf-8') as file:
                 log = json.load(file)
             if self.verify_log_integrity(log):
+                migrated = False
+                for profile in log["node_profile"].values():
+                    if "auto_irrigation_enabled" not in profile:
+                        profile["auto_irrigation_enabled"] = profile.get("irrigation_status") is True
+                        migrated = True
+                if migrated:
+                    self.save_log(log)
                 return log
         return deepcopy(LOG_STRUCTURE)
     
 
+    @synchronized
     def save_log(self, log: dict):
         if not self.verify_log_integrity(log):
             raise ValueError("Log structure is invalid.")
         atomic_write_text(self.log_file_path, json.dumps(log, indent=4))
 
 
+    @synchronized
     def log_node(self, node_id: str):
         log = self.load_log()
 
@@ -77,7 +98,8 @@ class OperationLogManager:
             "pwp": self.default_profile["pwp"],
             "madp": self.default_profile["madp"],
             "fc": self.default_profile["fc"],
-            "sp": self.default_profile["sp"]
+            "sp": self.default_profile["sp"],
+            "auto_irrigation_enabled": True
         }
         self.save_log(log)
 
@@ -85,17 +107,20 @@ class OperationLogManager:
     def get_model_status(self) -> dict:
         return self.load_log()["model_status"]
 
+    @synchronized
     def initialize_retrain_period(self, period: str) -> None:
         log = self.load_log()
         log["model_status"]["last_retrain_period"] = period
         self.save_log(log)
 
+    @synchronized
     def log_model_training(self, period: str) -> None:
         log = self.load_log()
         log["model_status"].update(new_model_pending=True, new_model_ready=False,
                                    new_model_path="", last_retrain_period=period)
         self.save_log(log)
 
+    @synchronized
     def log_model_ready(self, model_path: str) -> None:
         log = self.load_log()
         status = log["model_status"]
@@ -104,6 +129,7 @@ class OperationLogManager:
         status.update(new_model_pending=False, new_model_ready=True, new_model_path=model_path)
         self.save_log(log)
 
+    @synchronized
     def clear_model_status(self, *, retry: bool = False) -> None:
         log = self.load_log()
         status = log["model_status"]
@@ -131,6 +157,7 @@ class OperationLogManager:
         return madp
 
 
+    @synchronized
     def log_node_profile(
         self,
         node_id: str,
@@ -177,7 +204,7 @@ class OperationLogManager:
         if not isinstance(profile, dict):
             return None
 
-        fields = ("node_id", "plant", "pwp", "madp", "fc", "sp")
+        fields = ("node_id", "plant", "pwp", "madp", "fc", "sp", "auto_irrigation_enabled")
         if any(profile.get(field) is None for field in fields):
             return None
 
@@ -190,13 +217,17 @@ class OperationLogManager:
         return recorded_nodes
     
     
+    @synchronized
     def log_irrigation_status(self, node_id: str, status: bool):
         log = self.load_log()
 
         if node_id not in log['node_profile']:
             raise ValueError(f"Node ID {node_id} not found in log.")
 
-        log['node_profile'][node_id]['irrigation_status'] = status
+        if type(status) is not bool:
+            raise ValueError("Auto irrigation permission must be Boolean.")
+        log["node_profile"][node_id]["auto_irrigation_enabled"] = status
+        log["node_profile"][node_id].pop("irrigation_status", None)
         self.save_log(log)
     
     

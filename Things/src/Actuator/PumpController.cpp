@@ -76,8 +76,8 @@ bool PumpController::start(uint32_t durationMs) {
         return false;
     }
 
-    if (m_pwmPercent == 0) {
-        Serial.println("[PUMP] Rejected: PWM is set to 0%.");
+    if (m_pwmDuty == 0) {
+        Serial.println("[PUMP] Rejected: PWM duty is 0.");
         return false;
     }
 
@@ -92,6 +92,7 @@ bool PumpController::start(uint32_t durationMs) {
     turnMotorOn();
 
     m_isRunning = true;
+    if (m_stateCallback) m_stateCallback(true);
 
     Serial.println();
     Serial.println("========== PUMP STARTED ==========");
@@ -101,8 +102,8 @@ bool PumpController::start(uint32_t durationMs) {
     Serial.println(" ms");
 
     Serial.print("[PUMP] PWM: ");
-    Serial.print(m_pwmPercent);
-    Serial.println("%");
+    Serial.print(m_pwmDuty);
+    Serial.println("/255");
 
     Serial.println("==================================");
 
@@ -121,6 +122,7 @@ void PumpController::stop() {
     m_isRunning = false;
     m_durationMs = 0;
     m_startTime = 0;
+    if (m_stateCallback) m_stateCallback(false);
 
     Serial.println();
     Serial.println("[PUMP] Pump stopped.");
@@ -142,28 +144,16 @@ void PumpController::update() {
     }
 }
 
-void PumpController::setPwmPercent(uint8_t percent) {
-
-    // Limit the value to the supported range.
-    if (percent > 100) {
-        percent = 100;
-    }
-
-    m_pwmPercent = percent;
-
-    // Apply the new PWM immediately if the pump is running.
+void PumpController::setPwmDuty(uint8_t duty) {
+    m_pwmDuty = duty;
     if (m_isRunning) {
-
-        writePwmDuty(getPwmDuty());
+        if (duty == 0) stop();
+        else writePwmDuty(getPwmDuty());
     }
-
-    Serial.print("[PUMP] PWM configured: ");
-    Serial.print(m_pwmPercent);
-    Serial.println("%");
 }
 
-uint8_t PumpController::getPwmPercent() const {
-    return m_pwmPercent;
+uint8_t PumpController::getPwmDutyValue() const {
+    return m_pwmDuty;
 }
 
 bool PumpController::isRunning() const {
@@ -187,10 +177,7 @@ uint32_t PumpController::getRemainingTime() const {
 
 uint32_t PumpController::getPwmDuty() const {
 
-    return (
-        static_cast<uint32_t>(m_pwmPercent) *
-        PWM_MAX_DUTY
-    ) / 100;
+    return m_pwmDuty;
 }
 
 void PumpController::writePwmDuty(uint32_t duty) {
@@ -212,7 +199,7 @@ void PumpController::writePwmDuty(uint32_t duty) {
 
 void PumpController::turnMotorOn() {
 
-    if (!m_pwmInitialized || m_pwmPercent == 0) {
+    if (!m_pwmInitialized || m_pwmDuty == 0) {
         return;
     }
 

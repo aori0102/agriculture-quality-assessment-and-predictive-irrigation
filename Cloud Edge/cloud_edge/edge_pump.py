@@ -40,7 +40,7 @@ class EdgePumpBackend:
         record = log['node_profile'][node_id]
         if not isinstance(record, dict) or record.get('node_id') != node_id:
             raise ValueError('Invalid Edge node record.')
-        if 'irrigation_status' in record and type(record['irrigation_status']) is not bool:
+        if 'auto_irrigation_enabled' in record and type(record['auto_irrigation_enabled']) is not bool:
             raise ValueError('Saved irrigation flag must be Boolean.')
         return record
 
@@ -71,12 +71,12 @@ class EdgePumpBackend:
                     return result('rejected', 'Unknown Edge node; register it in Edge first')
                 if stale():
                     return result('discarded', 'Request expired, disconnected, or dispatcher stopped')
-                if record.get('irrigation_status') is command.requested_on:
+                if record.get('auto_irrigation_enabled') is command.requested_on:
                     return result('unchanged', 'Requested irrigation flag already saved; hardware state unconfirmed')
                 update = self._enable if command.requested_on else self._disable
                 update(node_id=node_id)
                 saved = self._record(node_id)
-                if saved is None or saved.get('irrigation_status') is not command.requested_on:
+                if saved is None or saved.get('auto_irrigation_enabled') is not command.requested_on:
                     raise ValueError('Irrigation flag readback mismatch.')
                 return result('saved', 'Requested irrigation flag saved; hardware state unconfirmed')
             except Exception:

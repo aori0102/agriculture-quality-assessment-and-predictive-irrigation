@@ -81,6 +81,8 @@ public:
 
     bool isConnected() const;
 
+    bool publishEvent(const char* event, uint32_t sampleSeq = 0);
+
     bool publishTelemetry(const String& payload);
 
     bool publishImage(
