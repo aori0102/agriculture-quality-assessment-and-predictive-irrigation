@@ -185,6 +185,13 @@ class CloudClient:
                 raise ValueError("node_id does not match this CloudClient's binding.")
             self._http.write_control(BlynkPins.PUMP_STATUS_DETAIL, detail)
 
+    def report_node_catalog(self, *, node_id: str, catalog: str) -> None:
+        with self._lock:
+            self._ensure_open()
+            if node_id != self._node_id:
+                raise ValueError("node_id does not match this CloudClient's binding.")
+            self._http.write_control(BlynkPins.NODE_CATALOG, catalog)
+
     def poll_command(self) -> PumpCommand | None:
         """Consume the latest unexpired PumpCommand without waiting on network I/O.
 

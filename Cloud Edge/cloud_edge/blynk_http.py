@@ -104,6 +104,9 @@ class BlynkHTTP:
         elif pin == BlynkPins.PUMP_STATUS_DETAIL:
             if not isinstance(value, str) or not value or len(value) > 128:
                 raise ValueError("Invalid pump status detail.")
+        elif pin == BlynkPins.NODE_CATALOG:
+            if not isinstance(value, str) or not value or len(value.encode("utf-8")) > 1024:
+                raise ValueError("Invalid node catalog.")
         else:
             raise ValueError("Invalid control datastream.")
         with self._lock:

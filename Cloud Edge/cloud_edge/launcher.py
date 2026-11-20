@@ -19,6 +19,7 @@ from .edge_profiles import EdgeProfileBackend
 from .edge_pump import EdgePumpBackend, PumpDispatcher
 from .device_registry import RuntimeDeviceRegistry
 from .device_store import CreateJournal, DeviceStore
+from .node_catalog import encode_node_catalog
 from .provisioning import DeviceProvisioningWorker, stable_name
 from .blynk_provisioner import BlynkProvisioner
 
@@ -81,6 +82,7 @@ def run_with_clients(
 ):
     """One shared adapter across all devices; close even after partial startup."""
     with ExitStack() as resources:
+        bindings = tuple(bindings)
         if instance_lock is not None:
             lock_fd = acquire_instance_lock(instance_lock)
             resources.callback(os.close, lock_fd)
@@ -97,6 +99,7 @@ def run_with_clients(
                 client.close()
                 raise
         worker = None
+        store = None
         if provisioning is not None:
             store = DeviceStore(provisioning["device_store"])
             persisted = store.load()
@@ -104,6 +107,10 @@ def run_with_clients(
                 record.token for record in persisted.values()
             }:
                 raise ValueError("Static and persisted device tokens conflict.")
+            if {binding.device_id for binding in bindings if getattr(binding, "device_id", None) is not None} & {
+                record.device_id for record in persisted.values()
+            }:
+                raise ValueError("Static and persisted device IDs conflict.")
             for node_id, record in persisted.items():
                 if record.stable_name != stable_name(provisioning["edge_id"], node_id):
                     raise ValueError(
@@ -126,6 +133,30 @@ def run_with_clients(
             reporter.configure(clients)
             resources.callback(reporter.close)
 
+        binding_info = {binding.node_id: (getattr(binding, "device_id", None),
+                                          getattr(binding.config, "server", None))
+                        for binding in bindings}
+
+        def publish_catalog():
+            if reporter is None:
+                return
+            persisted = store.load() if store is not None else {}
+            entries = []
+            for node_id, _ in clients.snapshot():
+                if node_id in binding_info:
+                    device_id, server = binding_info[node_id]
+                else:
+                    record = persisted[node_id]
+                    device_id, server = record.device_id, record.server
+                entries.append((node_id, device_id, server))
+            if any(server is None for _, _, server in entries):
+                return
+            catalog = encode_node_catalog(entries)
+            for node_id, _ in clients.snapshot():
+                reporter.submit("report_node_catalog", node_id=node_id, catalog=catalog)
+
+        publish_catalog()
+
         def report_initial_state(node_id):
             if reporter is None or pump_coordinator is None:
                 return
@@ -142,6 +173,7 @@ def run_with_clients(
             if reporter is not None:
                 reporter.submit("send_telemetry", node_id=node_id, **snapshot)
                 report_initial_state(node_id)
+                publish_catalog()
 
         if provisioning is not None:
             worker = DeviceProvisioningWorker(

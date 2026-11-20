@@ -121,6 +121,14 @@ class ClientTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.client.report_pump_detail(node_id="other", detail="confirmed: off")
 
+    def test_catalog_upload_uses_v19_and_bound_node(self):
+        payload = '{"v":1,"nodes":[]}'
+        self.client.report_node_catalog(node_id="node-1", catalog=payload)
+        self.assertEqual(self.session.get.call_args.kwargs["params"],
+                         {"token": "test-secret", "v19": payload})
+        with self.assertRaises(ValueError):
+            self.client.report_node_catalog(node_id="other", catalog=payload)
+
     def test_own_mode_write_does_not_cancel_a_manual_start(self):
         self.client.start()
         self.network.on_connect(self.network, None, None,

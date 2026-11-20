@@ -18,6 +18,7 @@ class BlynkPins:
     PROFILE_PRESET = "v16"
     AUTO_IRRIGATION_ENABLED = "v17"
     PUMP_STATUS_DETAIL = "v18"
+    NODE_CATALOG = "v19"
 
 
 class BlynkTopics:

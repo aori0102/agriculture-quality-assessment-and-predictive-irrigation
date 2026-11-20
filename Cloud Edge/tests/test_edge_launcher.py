@@ -34,6 +34,9 @@ class LauncherTests(unittest.TestCase):
                 while dynamic.send_telemetry.call_count < 1 and monotonic() < deadline:
                     sleep(.01)
                 dynamic.send_telemetry.assert_called_once_with(node_id='esp_new_a', soil_index_pct=42)
+                while dynamic.report_node_catalog.call_count < 1 and monotonic() < deadline:
+                    sleep(.01)
+                dynamic.report_node_catalog.assert_called()
                 handler.on_accepted('esp_new_a', {'soil_index_pct': 43})
                 reporter.submit('send_ai_results', node_id='esp_new_a', plant_status='Healthy')
                 reporter.submit('report_pump_status', node_id='esp_new_a', is_on=False)
@@ -48,7 +51,8 @@ class LauncherTests(unittest.TestCase):
             }
             with patch('cloud_edge.launcher.BlynkProvisioner', return_value=provisioner):
                 run_with_clients(edge_main, object(),
-                    [SimpleNamespace(node_id='static', config=SimpleNamespace(auth_token='test-static-token'))],
+                    [SimpleNamespace(node_id='static', device_id=41,
+                                     config=SimpleNamespace(auth_token='test-static-token', server='sgp1.blynk.cloud'))],
                     client_factory=factory, pump_backend=pump_backend,
                     telemetry_handler=handler, reporter=reporter, provisioning=settings)
             static.send_telemetry.assert_called_once_with(node_id='static', soil_index_pct=40)
@@ -58,6 +62,10 @@ class LauncherTests(unittest.TestCase):
             ])
             dynamic.send_ai_results.assert_called_once_with(node_id='esp_new_a', plant_status='Healthy')
             dynamic.report_pump_status.assert_called_once_with(node_id='esp_new_a', is_on=False)
+            import json
+            catalog = json.loads(dynamic.report_node_catalog.call_args.kwargs['catalog'])
+            self.assertEqual({entry['n']: entry['d'] for entry in catalog['nodes']},
+                             {'static': 41, 'esp_new_a': 42})
             provisioner.create_device.assert_called_once()
             self.assertIsNone(handler.on_accepted)
 

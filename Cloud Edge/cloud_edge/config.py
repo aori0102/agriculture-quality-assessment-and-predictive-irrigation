@@ -86,6 +86,7 @@ class CloudConfig:
 class DeviceBinding:
     node_id: str
     config: CloudConfig
+    device_id: int | None = None
 
 
 def load_device_bindings(values: Mapping[str, str] | None = None, *, allow_empty: bool = False) -> tuple[DeviceBinding, ...]:
@@ -104,19 +105,24 @@ def load_device_bindings(values: Mapping[str, str] | None = None, *, allow_empty
         raise ValueError("BLYNK_DEVICES_JSON must be a nonempty JSON array.") from None
     if not isinstance(entries, list) or (not entries and not allow_empty):
         raise ValueError("BLYNK_DEVICES_JSON must be a nonempty JSON array.")
-    bindings, nodes, tokens = [], set(), set()
+    bindings, nodes, tokens, device_ids = [], set(), set(), set()
     for entry in entries:
-        if not isinstance(entry, dict) or set(entry) != {"node_id", "server", "auth_token_env"}:
-            raise ValueError("Each device binding requires node_id, server, auth_token_env only.")
+        if not isinstance(entry, dict) or not {"node_id", "server", "auth_token_env"} <= set(entry) or set(entry) - {"node_id", "server", "auth_token_env", "device_id"}:
+            raise ValueError("Each device binding requires node_id, server, auth_token_env and optional device_id.")
         node_id, token_env = entry["node_id"], entry["auth_token_env"]
         if not isinstance(node_id, str) or not node_id.strip() or len(node_id) > 128 or not node_id.isprintable():
             raise ValueError("Binding node_id must be nonempty printable text of at most 128 characters.")
         if not isinstance(token_env, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", token_env):
             raise ValueError("auth_token_env must name an environment variable.")
         config = CloudConfig(server=entry["server"], auth_token=values.get(token_env, ""))
-        if node_id in nodes or config.auth_token in tokens:
-            raise ValueError("Device bindings must have unique node IDs and unique tokens.")
+        device_id = entry.get("device_id")
+        if device_id is not None and (type(device_id) is not int or device_id <= 0):
+            raise ValueError("device_id must be a positive Blynk device ID.")
+        if node_id in nodes or config.auth_token in tokens or (device_id is not None and device_id in device_ids):
+            raise ValueError("Device bindings must have unique node IDs, device IDs, and tokens.")
         nodes.add(node_id)
         tokens.add(config.auth_token)
-        bindings.append(DeviceBinding(node_id, config))
+        if device_id is not None:
+            device_ids.add(device_id)
+        bindings.append(DeviceBinding(node_id, config, device_id))
     return tuple(bindings)

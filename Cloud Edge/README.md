@@ -117,6 +117,7 @@ empty snapshot sends nothing. Closing waits for any active upload to finish.
 | V6 | `weather_humidity` | Percentage, converted to integer |
 | V17 | `auto_irrigation_enabled` | Inbound Auto switch, `0`/`1`; Edge also publishes saved mode |
 | V18 | `pump_status_detail` | Pending, confirmed, or unknown text from Edge |
+| V19 | `node_catalog` | Read-only JSON list of registered Blynk-bound nodes for the profile widget |
 
 These names match the current BTL template export. The Edge-facing Python
 arguments remain `soil_index_pct`, `temperature_c`, `air_humidity_pct`, and

@@ -25,7 +25,7 @@
 <div class="widget">
  <header class="head"><div class="head-inner">
   <div><div class="overline">GREENHOUSE / CONTROL</div><div class="heading">Plant Profile</div><div class="desc">Plant information & irrigation configuration</div></div>
-  <div><label class="desc" for="profileSelect" style="display:block;margin:0 0 5px">GO TO PROFILE</label><div class="profile-controls"><select class="profile-select" id="profileSelect" aria-label="Select a plant profile"></select><button id="openProfile" class="outline" type="button" title="Open the selected device dashboard">Open ↗</button></div></div>
+  <div><label class="desc" for="profileSelect" style="display:block;margin:0 0 5px">GO TO NODE</label><div class="profile-controls"><select class="profile-select" id="profileSelect" aria-label="Select a registered node"></select><button id="openProfile" class="outline" type="button" title="Open the selected device dashboard">Open ↗</button></div><div id="navigationStatus" class="desc" role="status"></div></div>
  </div></header>
  <main class="content">
   <section class="summary" aria-label="Plant overview">
@@ -48,16 +48,16 @@
 (function(){
  'use strict';
  /* Bind in this order: V11 MAD, V12 FC, V10 PWP, V13 SAT, V2 health,
-    V14 Apply, V15 status, V16 preset, V7 node, V8 description, V9 plant name.
+    V14 Apply, V15 status, V16 preset, V7 node, V8 description, V9 plant name,
+    optional V19 node catalog at index 11 for cross-device navigation.
     Threshold streams use fractions 0–1; this UI displays percentages.
     Apply writes a Custom draft, verifies readback, then sends V14=1.
     The backend owns resetting V14. Use one editor per device.
-    Node identity comes from V7; navigation labels/links are independent.
+    Node identity comes from V7; V19 contains Edge's public registered-node list.
     See README.md for setup and scalar-protocol confirmation limitations. */
- const PROFILE_LINKS = [
-  {label:'Plant 01',dashboardUrl:'https://sgp1.blynk.cloud/dashboard/1181191/global/devices/474839/organization/1181191/devices/4317587/dashboard'},
-  {label:'Plant 02',dashboardUrl:'https://sgp1.blynk.cloud/dashboard/1181191/global/devices/474839/organization/1181191/devices/4333323/dashboard'},
- ];
+ const DASHBOARD_ID=474839; // Shared BTL dashboard route; node IDs come from V19.
+ const DASHBOARD_ORG_ID=1181191; // Public BTL organization route, used if device info is unavailable.
+ const CATALOG_INDEX=11;
  const DEFAULT_DESCRIPTION='Monitor soil moisture and adjust irrigation settings for this plant.';
  const DEMO={nodeId:'DEMO_NODE',name:'Demo plant',mad:40,fc:35,pwp:15,sat:50};
  const KEYS=['mad','fc','pwp','sat'];
@@ -68,6 +68,7 @@
  const LIVE=!!(bridge&&bridge.isBridgeAvailable());
  let nodeId=null,initialized=false,nodeChanged=false;
  let saved=LIVE?{}:{...DEMO},draft={...saved},streams=new Map(),pending=null;
+ let deviceInfo=null,catalogNodes=[],catalogError='';
  let editingName=false,editStartName='';
  const pushed=new Set();
  function message(text,error=false){$('#message').textContent=text;$('#message').classList.toggle('error',error)}
@@ -90,6 +91,29 @@
  function ready(){return !setupIssue()}
  function validName(name){return typeof name==='string'&&!!name.trim()&&[...name].length<=128&&!/[\p{C}\p{Zl}\p{Zp}]/u.test(name)&&![...name].some(c=>/\p{Zs}/u.test(c)&&c!==' ')}
  function changeStatus(status){const s=String(status||'Unknown');$('#plantHealth').textContent=s;$('#plantHealth').className='status '+(/^healthy$/i.test(s)?'':/^unknown$/i.test(s)?'unknown':'warning')}
+ function parseCatalog(raw){
+  if(typeof raw!=='string'||raw.length>1024)return {nodes:[],error:'Waiting for Edge node catalog.'};
+  try{
+   const data=JSON.parse(raw);
+   if(data?.v!==1||!Array.isArray(data.nodes))return {nodes:[],error:data?.error==='catalog_too_large'?'Node catalog exceeds V19 capacity.':'Invalid Edge node catalog.'};
+   const seen=new Set(),nodes=[];
+   for(const entry of data.nodes){
+    if(!entry||!validName(entry.n)||seen.has(entry.n)||!(entry.d===null||Number.isSafeInteger(entry.d)&&entry.d>0)||typeof entry.h!=='string'||! /^[a-z0-9-]+\.blynk\.cloud$/.test(entry.h))return {nodes:[],error:'Invalid Edge node catalog.'};
+    seen.add(entry.n);nodes.push({nodeId:entry.n,deviceId:entry.d,server:entry.h});
+   }
+   return {nodes,error:''};
+  }catch{return {nodes:[],error:'Invalid Edge node catalog.'}}
+ }
+ function renderNodeOptions(){
+  const select=$('#profileSelect'),selected=select.value;
+  const nodes=[...catalogNodes];
+  if(validName(nodeId)&&!nodes.some(entry=>entry.nodeId===nodeId))nodes.unshift({nodeId,deviceId:null,server:null});
+  const placeholder=document.createElement('option');placeholder.value='';placeholder.textContent='Go to node…';
+  const options=nodes.map(entry=>{const option=document.createElement('option');option.value=entry.nodeId;option.textContent=entry.nodeId;return option});
+  select.replaceChildren(placeholder,...options);
+  select.value=nodes.some(entry=>entry.nodeId===selected)?selected:'';
+  $('#navigationStatus').textContent=!LIVE?'Preview only':catalogError||(!streams.has(CATALOG_INDEX)?'Bind V19 to list registered nodes.':nodes.length?'':'No registered nodes reported.');
+ }
  function render(){
   $('#nodeId').textContent=LIVE?(nodeId||'Waiting for node ID'):DEMO.nodeId;
   $('#plantName').textContent=draft.name||'Unnamed plant';
@@ -109,7 +133,7 @@
   $('#setupMessage').textContent=!initialized?'Loading device data; slider edits stay local.':issue||(!valid(draft)?'Set all four values: 0 < MAD < 100 and 0 ≤ PWP < FC < SAT ≤ 100%.':'Slider edits stay local until you click Apply.');
   $('#setupMessage').classList.toggle('error',!!issue);
   $('#resetBtn').disabled=!!pending||!initialized;
-  $('#profileSelect').disabled=!!pending;$('#openProfile').disabled=!!pending;
+  $('#profileSelect').disabled=!!pending||dirty();$('#openProfile').disabled=!!pending||dirty();
   $('#footerMode').textContent=LIVE?'BLYNK · ONE EDITOR PER DEVICE':'BROWSER PREVIEW · DEMO DATA ONLY';
  }
  // Lock identity after the first valid V7 value; do not retarget an existing draft.
@@ -125,6 +149,8 @@
   if(Number.isFinite(old?.lastUpdated)&&Number.isFinite(item.lastUpdated)&&item.lastUpdated<old.lastUpdated)return;
   streams.set(item.index,item);
   if(item.index===INDEX.node)observeNode(item.value);
+  if(item.index===CATALOG_INDEX){const parsed=parseCatalog(item.value);catalogNodes=parsed.nodes;catalogError=parsed.error}
+  if(item.index===INDEX.node||item.index===CATALOG_INDEX)renderNodeOptions();
   if(item.index===INDEX.health)changeStatus(item.value);
   if(!pending&&item.index===INDEX.name){const untouched=draft.name===saved.name;saved.name=typeof item.value==='string'?item.value:'';if(untouched)draft.name=saved.name}
   if(!pending&&item.index<4){const key=KEYS[item.index],value=number(item.value)*100,untouched=Object.is(draft[key],saved[key]);saved[key]=value;if(untouched)draft[key]=value}
@@ -194,16 +220,18 @@
  }
  function openProfile(){
   if(pending)return;
+  if(dirty()){message('Apply or Reset local edits before navigating.',true);return}
   const selected=$('#profileSelect').value;
-  const profile=selected===''?null:PROFILE_LINKS[Number(selected)];
-  if(!profile||!/^https:\/\//.test(profile.dashboardUrl)){message('Configure an HTTPS dashboard link first.',true);return}
-  const link=document.createElement('a');link.href=profile.dashboardUrl;link.target='_blank';link.rel='noopener noreferrer';document.body.appendChild(link);link.click();link.remove();
+  const entry=catalogNodes.find(item=>item.nodeId===selected);
+  const deviceId=entry?.deviceId||(selected===nodeId?deviceInfo?.id:null);
+  const server=entry?.server||'sgp1.blynk.cloud';
+  const orgId=deviceInfo?.orgId||DASHBOARD_ORG_ID;
+  if(!Number.isSafeInteger(deviceId)||deviceId<=0||!Number.isSafeInteger(orgId)||orgId<=0||! /^[a-z0-9-]+\.blynk\.cloud$/.test(server)){message('Dashboard link unavailable: waiting for this node’s Blynk device ID in V19.',true);return}
+  const link=document.createElement('a');link.href='https://'+server+'/dashboard/'+orgId+'/global/devices/'+DASHBOARD_ID+'/organization/'+orgId+'/devices/'+deviceId+'/dashboard';link.target='_blank';link.rel='noopener noreferrer';document.body.appendChild(link);link.click();link.remove();
   message('Opened dashboard link in a new tab. This widget remains on its current device. If blocked, retry Open ↗.');
  }
  function initEvents(){
-  const placeholder=document.createElement('option');placeholder.value='';placeholder.textContent='Go to profile…';$('#profileSelect').append(placeholder);
-  PROFILE_LINKS.forEach((profile,index)=>{const option=document.createElement('option');option.value=String(index);option.textContent=profile.label;$('#profileSelect').append(option)});
-  $('#profileSelect').value='';
+  renderNodeOptions();
   $('#profileSelect').addEventListener('change',()=>{if(dirty()||pending){$('#profileSelect').value='';message('Apply or Reset before navigating.',true);return}openProfile()});
   $('#openProfile').addEventListener('click',openProfile);
   for(const card of document.querySelectorAll('.parameter'))card.querySelector('input').addEventListener('input',event=>{if(pending)return;draft[card.dataset.key]=number(event.target.value);message('');render()});
@@ -217,6 +245,7 @@
   initEvents();changeStatus('Unknown');render();
   if(!LIVE){initialized=true;render();message('Preview mode: illustrative values, saved only in this page.');return}
   bridge.setCallbacks({onValueUpdated:item=>{if(item)pushed.add(item.index);update(item)},onError:error=>{if(pending)pending.error=String(error);message('Blynk: '+String(error),true)}});
+  if(typeof bridge.getDeviceInfo==='function')bridge.getDeviceInfo().then(info=>{deviceInfo=info;renderNodeOptions()}).catch(()=>{$('#navigationStatus').textContent='Device info unavailable; navigation may be limited.'});
   try{
    const values=await snapshot();for(const [index,item] of values)if(!pushed.has(index))update(item);
    if(!ready())message(setupIssue(),true);

@@ -17,6 +17,7 @@ to Blynk's HTML Widget, choose **Specific datastreams**, and assign this order:
 | 8 | V7 | node_id | String |
 | 9 | V8 | node_description | String |
 | 10 | V9 | plant_name | String |
+| 11 (optional) | V19 | node_catalog | String, read-only navigation catalog |
 
 The widget positions are not virtual pin numbers. Do not use **All datastreams**.
 Show at least three decimal places on the threshold streams. Do not change the
@@ -60,13 +61,23 @@ Unreported species/growth information is not invented
 in live mode. Ensure the Edge has restored a valid profile, plant name (or enter one locally),
 and description (which may be empty).
 
-`PROFILE_LINKS` contains only navigation labels and HTTPS dashboard URLs.
-Your configured names and links are preserved. The dropdown begins at
-**Go to profile…** and opens the selected link in a new tab; it neither identifies
-the current node nor writes V7/V16. Apply or Reset local edits before selecting
-another destination. Open can retry a link blocked by iframe/popup policy.
-The header displays the live node identity instead of a catalog profile number.
-Browser demo values are separate from the navigation list.
+Bind V19 at index 11 to populate **Go to node…** from the Edge registry. Edge
+publishes only node IDs, numeric Blynk device IDs, and regional hosts; no tokens.
+Newly provisioned nodes appear after Edge accepts their telemetry and creates a
+Blynk binding. Without V19, the dropdown shows only the current node. Static
+bindings can include an optional numeric `device_id` in `BLYNK_DEVICES_JSON` to
+make their cross-node links available. The current node can use Blynk's own
+device info when its static ID is omitted. The BTL dashboard route ID remains
+configured in `widget.html`; changing the dashboard route requires updating it.
+The catalog has a 1024-byte limit and shows an explicit error when exceeded.
+Apply or Reset local edits before selecting another node. Opening a node uses
+its Blynk dashboard in a new tab; the editor remains bound to its current node.
+
+For the live BTL dashboard, replace the HTML widget code with
+`plant_profile_dynamic.html` from **My Widgets** (or paste this repository's
+`widget.html`), assign V19 after the existing 11 streams, save the template,
+and apply the dashboard template to its devices. Restart the combined Edge
+process to publish the current catalog; later dynamic registrations refresh it.
 
 V16 is a different concept: 0 Custom, 1 Illustrative Lettuce preset. This widget
 edits thresholds, so it automatically switches to Custom on Apply if needed.
