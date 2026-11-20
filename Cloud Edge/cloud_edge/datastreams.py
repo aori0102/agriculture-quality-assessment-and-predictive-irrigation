@@ -16,10 +16,13 @@ class BlynkPins:
     APPLY_PROFILE = "v14"
     PROFILE_STATUS = "v15"
     PROFILE_PRESET = "v16"
+    AUTO_IRRIGATION_ENABLED = "v17"
+    PUMP_STATUS_DETAIL = "v18"
 
 
 class BlynkTopics:
     PUMP_COMMAND = "downlink/ds/pump_command"
+    AUTO_IRRIGATION_ENABLED = "downlink/ds/auto_irrigation_enabled"
     REDIRECT = "downlink/redirect"
     APPLY_PROFILE = "downlink/ds/apply_profile"
     PROFILE_PRESET = "downlink/ds/profile_preset"

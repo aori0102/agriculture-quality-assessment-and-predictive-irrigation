@@ -31,6 +31,7 @@ public:
     uint8_t getPwmPercent() const;
 
     bool isRunning() const;
+    bool takeStateChange();
 
     uint32_t getRemainingTime() const;
 
@@ -42,6 +43,7 @@ private:
     uint8_t m_pwmPercent = DEFAULT_PWM_PERCENT;
 
     bool m_isRunning = false;
+    bool m_stateChanged = false;
     bool m_pwmInitialized = false;
 
     uint32_t m_startTime = 0;

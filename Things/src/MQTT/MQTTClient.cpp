@@ -3,6 +3,7 @@
 
 #include <WiFi.h>
 #include <ArduinoJson.h>
+#include <Preferences.h>
 
 #include <cstring>
 #include <cstdio>
@@ -224,6 +225,8 @@ void MQTTClient::begin(
     m_telemetryTopic = baseTopic + "/telemetry";
     m_imageTopic = baseTopic + "/image";
     m_commandTopic = baseTopic + "/command";
+    m_eventTopic = baseTopic + "/events";
+    m_bootId = String(esp_random(), HEX) + String(esp_random(), HEX);
 
     // ---------------------------------------------
     // MQTT configuration.
@@ -251,6 +254,9 @@ void MQTTClient::begin(
         Serial.println(sessionPresent);
 
         subscribeCommandTopic();
+        if (m_pumpStateCallback) {
+            publishPumpState(m_pumpStateCallback());
+        }
     });
 
     // ---------------------------------------------
@@ -315,6 +321,40 @@ void MQTTClient::setPumpCommandCallback(
     std::function<bool(uint32_t)> callback
 ) {
     m_pumpCommandCallback = callback;
+}
+
+void MQTTClient::setStopPumpCallback(std::function<void()> callback) {
+    m_stopPumpCallback = callback;
+}
+
+void MQTTClient::setPumpStateCallback(std::function<bool()> callback) {
+    m_pumpStateCallback = callback;
+}
+
+bool MQTTClient::publishPumpState(bool isOn, const String& commandId) {
+    const time_t now = time(nullptr);
+    if (!m_client.connected() || now < 1700000000) return false;
+    auto timestamp = [](time_t value) {
+        struct tm utc;
+        gmtime_r(&value, &utc);
+        char buffer[25];
+        strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%SZ", &utc);
+        return String(buffer);
+    };
+    JsonDocument document;
+    document["node_id"] = m_clientId;
+    document["event"] = isOn ? "pump_started" : "pump_stopped";
+    document["boot_id"] = m_bootId;
+    document["sequence"] = ++m_eventSequence;
+    document["command_id"] = commandId;
+    document["run_id"] = m_activeRunId;
+    document["sent_at"] = timestamp(now);
+    document["valid_until"] = timestamp(now + 10);
+    String payload;
+    serializeJson(document, payload);
+    const bool queued = m_client.publish(m_eventTopic.c_str(), 1, false, payload.c_str()) != 0;
+    if (!isOn) m_activeRunId = "";
+    return queued;
 }
 
 // =====================================================
@@ -597,6 +637,10 @@ void MQTTClient::processCommand(
 
     if (strcmp(action, "start_pump") == 0) {
 
+        if (!document["command_id"].is<const char*>()) return;
+        const String commandId = document["command_id"].as<String>();
+        if (commandId.length() != 32) return;
+
         if (!document["duration_ms"].is<uint32_t>()) {
             Serial.println(
                 "[COMMAND] Rejected: invalid duration_ms!"
@@ -627,6 +671,15 @@ void MQTTClient::processCommand(
             return;
         }
 
+        Preferences history;
+        if (!history.begin("pump_commands", false)) return;
+        if (history.getString("last_start", "") == commandId ||
+            history.putString("last_start", commandId) != commandId.length()) {
+            history.end();
+            return;
+        }
+        history.end();
+
         Serial.println("[COMMAND] Pump command accepted!");
 
         Serial.print("[COMMAND] Pump duration: ");
@@ -636,6 +689,8 @@ void MQTTClient::processCommand(
         bool started = m_pumpCommandCallback(durationMs);
 
         if (started) {
+            m_activeRunId = commandId;
+            publishPumpState(true, commandId);
             Serial.println("[COMMAND] Pump started successfully!");
         }
         else {
@@ -644,6 +699,16 @@ void MQTTClient::processCommand(
             );
         }
 
+        return;
+    }
+
+    if (strcmp(action, "stop_pump") == 0) {
+        if (!document["command_id"].is<const char*>() || !m_stopPumpCallback) return;
+        const String commandId = document["command_id"].as<String>();
+        if (commandId.length() != 32) return;
+        m_stopPumpCallback();
+        publishPumpState(false, commandId);
+        m_activeRunId = "";
         return;
     }
 

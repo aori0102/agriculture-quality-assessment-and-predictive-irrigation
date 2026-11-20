@@ -14,6 +14,7 @@ class CloudReporter:
         self.worker = None
         self.last_pump_event = {}
         self.lock = Lock()
+        self.on_pump_event = None
 
     def configure(self, clients):
         if self.worker is not None:
@@ -72,6 +73,9 @@ class CloudReporter:
             now = now or datetime.now(timezone.utc)
             if sent is None or until is None or not sent <= now < until:
                 return False
+            if self.on_pump_event is not None:
+                self.on_pump_event(node_id, data)
+                return True
             with self.lock:
                 previous = self.last_pump_event.get(node_id)
                 if previous is not None and sent <= previous:

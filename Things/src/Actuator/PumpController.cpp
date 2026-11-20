@@ -92,6 +92,7 @@ bool PumpController::start(uint32_t durationMs) {
     turnMotorOn();
 
     m_isRunning = true;
+    m_stateChanged = true;
 
     Serial.println();
     Serial.println("========== PUMP STARTED ==========");
@@ -119,6 +120,7 @@ void PumpController::stop() {
     turnMotorOff();
 
     m_isRunning = false;
+    m_stateChanged = true;
     m_durationMs = 0;
     m_startTime = 0;
 
@@ -168,6 +170,12 @@ uint8_t PumpController::getPwmPercent() const {
 
 bool PumpController::isRunning() const {
     return m_isRunning;
+}
+
+bool PumpController::takeStateChange() {
+    const bool changed = m_stateChanged;
+    m_stateChanged = false;
+    return changed;
 }
 
 uint32_t PumpController::getRemainingTime() const {

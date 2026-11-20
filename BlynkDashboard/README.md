@@ -46,6 +46,9 @@ The description below the plant name displays V8 `node_description`. When V8
 is empty or unavailable, it displays: “Monitor soil moisture and adjust irrigation
 settings for this plant.” This is a display-only fallback; it does not overwrite
 V8 or count as an unapplied change.
+The Blynk template default is not a guarantee that a device has a current V8
+value. An assigned V8 with an unset/null value is treated as the allowed empty
+description when applying a profile; a missing widget binding still blocks Apply.
 
 Plant name loads from V9; use the small **Edit** button beside it to edit a local
 draft. **Done** or Enter closes the editor without sending anything; Escape

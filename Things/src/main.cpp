@@ -658,8 +658,15 @@ void initializeMQTT() {
         Serial.println();
         Serial.println("[COMMAND] Starting water pump...");
 
-        return pumpController.start(durationMs);
+        const bool started = pumpController.start(durationMs);
+        if (started) pumpController.takeStateChange();
+        return started;
     });
+    mqttClient.setStopPumpCallback([]() {
+        pumpController.stop();
+        pumpController.takeStateChange();
+    });
+    mqttClient.setPumpStateCallback([]() { return pumpController.isRunning(); });
 
     // ---------------------------------------------
     // 3. Initialize MQTT.
@@ -896,6 +903,14 @@ void loop() {
     // ---------------------------------------------
 
     pumpController.update();
+    if (pumpController.takeStateChange()) {
+        mqttClient.publishPumpState(pumpController.isRunning());
+    }
+    static uint32_t lastPumpStatePublish = 0;
+    if (millis() - lastPumpStatePublish >= 5000) {
+        lastPumpStatePublish = millis();
+        mqttClient.publishPumpState(pumpController.isRunning());
+    }
 
     // ---------------------------------------------
     // 3. Update connection status LED.

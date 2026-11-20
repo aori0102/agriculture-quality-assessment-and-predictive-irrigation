@@ -25,10 +25,11 @@ class EdgePumpBackend:
     return promptly; ongoing updates are not cancelled or retried automatically.
     """
 
-    def __init__(self, enable, disable, load_log, *, operation_lock=None):
+    def __init__(self, enable, disable, load_log, *, operation_lock=None, control_request=None):
         if not all(callable(fn) for fn in (enable, disable, load_log)):
             raise ValueError('Edge enable, disable, and read functions must be callable.')
         self._enable, self._disable, self._read = enable, disable, load_log
+        self._control_request = control_request
         self._lock = operation_lock if operation_lock is not None else RLock()
 
     def _record(self, node_id):
@@ -71,6 +72,11 @@ class EdgePumpBackend:
                     return result('rejected', 'Unknown Edge node; register it in Edge first')
                 if stale():
                     return result('discarded', 'Request expired, disconnected, or dispatcher stopped')
+                if self._control_request is not None:
+                    accepted = self._control_request(node_id, command.control, command.requested_on)
+                    return result('saved' if accepted else 'rejected',
+                                  'Edge control request accepted; hardware state unconfirmed' if accepted
+                                  else 'Edge control request rejected or local MQTT unavailable')
                 if record.get('irrigation_status') is command.requested_on:
                     return result('unchanged', 'Requested irrigation flag already saved; hardware state unconfirmed')
                 update = self._enable if command.requested_on else self._disable

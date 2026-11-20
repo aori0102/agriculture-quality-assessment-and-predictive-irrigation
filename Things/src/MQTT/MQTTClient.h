@@ -18,6 +18,10 @@ private:
     String m_telemetryTopic;
     String m_imageTopic;
     String m_commandTopic;
+    String m_eventTopic;
+    String m_bootId;
+    String m_activeRunId;
+    uint32_t m_eventSequence = 0;
 
     // Incoming command buffer.
     String m_incomingTopic;
@@ -42,6 +46,8 @@ private:
     // Called when a valid start_pump command is received.
     // Returns true if the pump starts successfully.
     std::function<bool(uint32_t)> m_pumpCommandCallback;
+    std::function<void()> m_stopPumpCallback;
+    std::function<bool()> m_pumpStateCallback;
 
     void connect();
 
@@ -78,6 +84,9 @@ public:
     void setPumpCommandCallback(
         std::function<bool(uint32_t)> callback
     );
+    void setStopPumpCallback(std::function<void()> callback);
+    void setPumpStateCallback(std::function<bool()> callback);
+    bool publishPumpState(bool isOn, const String& commandId = "");
 
     bool isConnected() const;
 

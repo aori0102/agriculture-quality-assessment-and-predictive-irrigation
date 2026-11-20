@@ -19,11 +19,12 @@ class PumpCommand:
     received_at: datetime
     expires_at: datetime
     _deadline: float = field(repr=False)
+    control: str = "pump"
 
     @classmethod
-    def _received(cls, node_id: str, requested_on: bool, lifetime: float) -> "PumpCommand":
+    def _received(cls, node_id: str, requested_on: bool, lifetime: float, *, control: str = "pump") -> "PumpCommand":
         now = datetime.now(timezone.utc)
-        return cls(node_id, requested_on, now, now + timedelta(seconds=lifetime), monotonic() + lifetime)
+        return cls(node_id, requested_on, now, now + timedelta(seconds=lifetime), monotonic() + lifetime, control)
 
     def is_expired(self) -> bool:
         """Check again immediately before execution, even after a successful poll."""

@@ -11,9 +11,8 @@ from pathlib import Path
 from configparser import ConfigParser
 from datetime import datetime, timezone
 from time import monotonic
-from action_index import ActionIndex
-from command_proxy import command_proxy
 from operation_log_manager import operation_log_manager
+from pump_control import pump_coordinator
 
 class IrrigationHandler:
     def __init__(self):
@@ -211,9 +210,13 @@ class IrrigationHandler:
         # Inference may finish after the window has changed; do not send a stale decision.
         if TimeHelper.get_current_slot() != target_sample_time:
             return False
-        if not telemetry_handler.record_irrigation_data(target_duration, node_id=node_id, timestamp=target_sample_time):
+        # The device accepts one bounded run. A later sample may authorize another.
+        run_duration_ms = min(int(target_duration * 60000), pump_coordinator.max_duration_ms)
+        if not pump_coordinator.request_automatic_start(node_id, run_duration_ms):
+            telemetry_handler.record_irrigation_data(0, node_id=node_id, timestamp=target_sample_time)
+            return True
+        if not telemetry_handler.record_irrigation_data(run_duration_ms / 60000, node_id=node_id, timestamp=target_sample_time):
             return False
-        self.send_irrigation_command(node_id, irrigation_minutes=target_duration)
         return True
     
     
@@ -244,12 +247,7 @@ class IrrigationHandler:
             print(f"Requested irrigation duration {duration_ms} ms exceeds maximum allowed {self.max_duration_ms} ms. Command not sent.")
             return
 
-        command_proxy.send_command(
-            node_id=node_id,
-            action=ActionIndex.StartPump,
-            ttl_ms=300_000,
-            duration_ms=duration_ms
-        )
+        pump_coordinator.request_automatic_start(node_id, duration_ms)
 
 
 irrigation_handler = IrrigationHandler()

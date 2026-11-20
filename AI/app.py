@@ -13,6 +13,7 @@ from command_proxy import command_proxy
 from IrrigationPrediction.model_retrainer import ModelRetrainer
 from IrrigationPrediction.irrigation_data_handler import irrigation_data_handler
 from operation_log_manager import operation_log_manager
+from pump_control import pump_coordinator
 
 CONFIG_FILE = "config.cfg"
 
@@ -73,6 +74,7 @@ def handle_image(node_id: str, jpeg: bytes) -> None:
 
 
 def main():
+    cloud_reporter.on_pump_event = pump_coordinator.enqueue_event
     cfg_path = Path(__file__).with_name(CONFIG_FILE)
     cfg = ConfigParser()
 
@@ -148,6 +150,7 @@ def main():
         nonlocal ready, subscription_mid
         ready = False
         subscription_mid = None
+        pump_coordinator.disconnected()
 
     def on_subscribe(client, userdata, mid, reason_codes, properties):
         nonlocal test_sent, ready, subscription_mid
@@ -202,12 +205,14 @@ def main():
             result = client.loop(timeout=1.0)
             if result != mqtt.MQTT_ERR_SUCCESS:
                 ready = False
+                pump_coordinator.disconnected()
                 subscription_mid = None
                 need_connection = True
                 sleep(1)
                 continue
 
             if ready and client.is_connected():
+                pump_coordinator.tick()
                 if retrainer.tick(can_swap=image_future is None or image_future.done()):
                     continue
                 irrigation_handler.loop()

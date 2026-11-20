@@ -58,7 +58,7 @@ class BlynkHTTP:
                 params[BlynkPins.PLANT_STATUS] = plant_status
             if pump_is_on is not None:
                 if type(pump_is_on) is not bool:
-                    raise ValueError("pump_is_on must be a boolean confirmed by the device.")
+                    raise ValueError("pump_is_on must be a device-confirmed boolean.")
                 params[BlynkPins.PUMP_STATUS] = int(pump_is_on)
             if not params:
                 return
@@ -68,7 +68,12 @@ class BlynkHTTP:
         """Fetch all editable profile streams in one HTTPS request."""
         with self._lock:
             params = dict.fromkeys((*PROFILE_FIELDS, BlynkPins.PROFILE_PRESET), "")
-            return self._request("get", params, read_json=True)
+            values = self._request("get", params, read_json=True)
+            # Blynk may return null for an empty string even when V8 is bound.
+            # Empty node_description is explicitly valid in the profile contract.
+            if values.get(BlynkPins.NODE_DESCRIPTION) is None:
+                values[BlynkPins.NODE_DESCRIPTION] = ""
+            return values
 
     def write_profile(self, values: dict) -> None:
         """Write only profile fields/status; Apply may only be reset to zero."""
@@ -91,6 +96,18 @@ class BlynkHTTP:
                 raise ValueError("Profile thresholds must be finite numbers between 0 and 1.")
         with self._lock:
             self._request("batch/update", dict(values))
+
+    def write_control(self, pin: str, value: int | str) -> None:
+        if pin == BlynkPins.AUTO_IRRIGATION_ENABLED:
+            if type(value) is not int or value not in (0, 1):
+                raise ValueError("Invalid automatic irrigation value.")
+        elif pin == BlynkPins.PUMP_STATUS_DETAIL:
+            if not isinstance(value, str) or not value or len(value) > 128:
+                raise ValueError("Invalid pump status detail.")
+        else:
+            raise ValueError("Invalid control datastream.")
+        with self._lock:
+            self._request("batch/update", {pin: value})
 
     def _request(self, path: str, params: dict, *, read_json: bool = False):
         # Caller holds the session lock. Never include URLs or response bodies

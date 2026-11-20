@@ -70,7 +70,7 @@ finally:
 
 | Method/property | Contract |
 | --- | --- |
-| `send_snapshot(*, node_id, soil_index_pct=None, temperature_c=None, air_humidity_pct=None, plant_status=None, predicted_moisture_pct=None, pump_is_on=None)` | One batch containing supplied fields. `pump_is_on` must be physically confirmed. |
+| `send_snapshot(*, node_id, soil_index_pct=None, temperature_c=None, air_humidity_pct=None, plant_status=None, predicted_moisture_pct=None, pump_is_on=None)` | One batch containing supplied fields. `pump_is_on` requires a firmware state event. |
 | `send_telemetry(*, node_id, soil_index_pct=None, temperature_c=None, air_humidity_pct=None)` | Sensor-only convenience method. |
 | `send_ai_results(*, node_id, plant_status=None, predicted_moisture_pct=None)` | AI-output convenience method. |
 | `report_pump_status(*, node_id, is_on)` | Report a boolean state confirmed by the device. |
@@ -112,9 +112,11 @@ empty snapshot sends nothing. Closing waits for any active upload to finish.
 | V1 | `weather_temp` | Finite number, sent as float |
 | V2 | `plant_status` | String supplied by the edge |
 | V3 | `pump_command` | Inbound `0`/`1`; never uploaded by this package |
-| V4 | `pump_status` | Confirmed boolean, uploaded as `0`/`1` |
+| V4 | `pump_status` | Firmware-confirmed controller state, uploaded as `0`/`1` |
 | V5 | `predicted_moisture` | Percentage, converted to integer |
 | V6 | `weather_humidity` | Percentage, converted to integer |
+| V17 | `auto_irrigation_enabled` | Inbound Auto switch, `0`/`1`; Edge also publishes saved mode |
+| V18 | `pump_status_detail` | Pending, confirmed, or unknown text from Edge |
 
 These names match the current BTL template export. The Edge-facing Python
 arguments remain `soil_index_pct`, `temperature_c`, `air_humidity_pct`, and
@@ -228,9 +230,9 @@ python "Cloud Edge/run_edge.py"
 See [PROFILES.md](PROFILES.md) for the existing AI configuration prerequisite,
 saved-versus-active semantics, metadata storage, and the adapter API.
 
-The launcher also forwards V3 requests to the existing AI enable/disable
-interfaces. See [pump-request wiring](PUMP_COMMANDS.md). Success verifies the saved
-irrigation flag; it does not update V4 or confirm physical pump execution.
+The launcher routes V3 and V17 requests through the Edge pump coordinator.
+See [irrigation control and confirmation](PUMP_COMMANDS.md) for the mode,
+firmware event, acknowledgement, and timeout behavior.
 
 ## Outbound data and device events
 

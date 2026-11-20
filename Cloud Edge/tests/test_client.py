@@ -99,7 +99,7 @@ class ClientTests(unittest.TestCase):
     def test_incoming_command_never_uploads_pump_status(self):
         self.client.start()
         self.network.on_connect(self.network, None, None, ReasonCode(PacketTypes.CONNACK, identifier=0), None)
-        self.network.on_subscribe(self.network, None, 7, [ReasonCode(PacketTypes.SUBACK, identifier=1)], None)
+        self.network.on_subscribe(self.network, None, 7, [ReasonCode(PacketTypes.SUBACK, identifier=1)] * 2, None)
         message = mqtt.MQTTMessage(topic=BlynkTopics.PUMP_COMMAND.encode())
         message.payload = b"1"
         self.network.on_message(self.network, None, message)
@@ -108,6 +108,34 @@ class ClientTests(unittest.TestCase):
         self.assertTrue(command.requested_on)
         self.assertTrue(self.client.commands_ready)
         self.session.get.assert_not_called()
+
+    def test_mode_and_detail_upload_only_to_bound_datastreams(self):
+        self.client.report_control_mode(node_id="node-1", enabled=False)
+        self.assertEqual(self.session.get.call_args.kwargs["params"],
+                         {"token": "test-secret", "v17": 0})
+        self.client.report_pump_detail(node_id="node-1", detail="unknown: awaiting device state")
+        self.assertEqual(self.session.get.call_args.kwargs["params"],
+                         {"token": "test-secret", "v18": "unknown: awaiting device state"})
+        with self.assertRaises(ValueError):
+            self.client.report_control_mode(node_id="node-1", enabled=1)
+        with self.assertRaises(ValueError):
+            self.client.report_pump_detail(node_id="other", detail="confirmed: off")
+
+    def test_own_mode_write_does_not_cancel_a_manual_start(self):
+        self.client.start()
+        self.network.on_connect(self.network, None, None,
+                                ReasonCode(PacketTypes.CONNACK, identifier=0), None)
+        self.network.on_subscribe(self.network, None, 7,
+                                  [ReasonCode(PacketTypes.SUBACK, identifier=1)] * 2, None)
+        self.client.report_control_mode(node_id="node-1", enabled=False)
+        echo = mqtt.MQTTMessage(topic=BlynkTopics.AUTO_IRRIGATION_ENABLED.encode())
+        echo.payload = b"0"
+        self.network.on_message(self.network, None, echo)
+        self.assertIsNone(self.client.poll_command())
+        opposite = mqtt.MQTTMessage(topic=BlynkTopics.AUTO_IRRIGATION_ENABLED.encode())
+        opposite.payload = b"1"
+        self.network.on_message(self.network, None, opposite)
+        self.assertEqual(self.client.poll_command().control, "auto")
 
     def test_close_waits_for_inflight_http_then_releases_resources(self):
         entered, release = threading.Event(), threading.Event()

@@ -83,7 +83,8 @@
 
   if(![0,1].includes(number(streams.get(INDEX.preset)?.value)))return 'Apply unavailable: V16 profile_preset must be 0 (Custom) or 1 (Lettuce).';
   if(!validName(draft.name))return 'Enter a plant name: 1–128 printable characters.';
-  if(typeof streams.get(INDEX.description)?.value!=='string')return 'Apply unavailable: V8 node_description must contain text (an empty string is allowed).';
+  const description=streams.get(INDEX.description)?.value;
+  if(description!=null&&typeof description!=='string')return 'Apply unavailable: V8 node_description must be text.';
   return '';
  }
  function ready(){return !setupIssue()}

@@ -46,7 +46,7 @@ class ExampleTests(unittest.TestCase):
     def test_live_example_prints_intent_without_reporting_execution(self):
         def connect_and_receive():
             self.network.on_connect(self.network, None, None, ReasonCode(PacketTypes.CONNACK, identifier=0), None)
-            self.network.on_subscribe(self.network, None, 7, [ReasonCode(PacketTypes.SUBACK, identifier=1)], None)
+            self.network.on_subscribe(self.network, None, 7, [ReasonCode(PacketTypes.SUBACK, identifier=1)] * 2, None)
             message = mqtt.MQTTMessage(topic=BlynkTopics.PUMP_COMMAND.encode())
             message.payload = b"1"
             self.network.on_message(self.network, None, message)

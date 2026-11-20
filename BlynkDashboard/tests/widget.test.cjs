@@ -5,12 +5,13 @@ const vm=require('node:vm');
 const html=fs.readFileSync(require('node:path').join(__dirname,'../widget.html'),'utf8');
 const keys=['mad','fc','pwp','sat'];
 function el(){return {value:'',textContent:'',style:{},dataset:{},disabled:false,classList:{toggle(){}},events:{},addEventListener(n,f){this.events[n]=f},append(){},focus(){},setAttribute(){},remove(){},click(){return this.events.click?.()}}}
-async function boot({preset=0,partial=false,unknown=false,live=true,fail=false,mismatch=false,stale=false,reject=false,restore=false,missingTimestamp=false,nodeId='NODE_001'}={}){
+async function boot({preset=0,partial=false,unknown=false,blankDescription=false,live=true,fail=false,mismatch=false,stale=false,reject=false,restore=false,missingTimestamp=false,nodeId='NODE_001'}={}){
  const ids=Object.fromEntries([...html.matchAll(/id="([^"]+)"/g)].map(m=>[m[1],el()]));
  const cards=keys.map(key=>{const c=el();c.dataset.key=key;c.input=el();c.reading=el();c.querySelector=s=>s==='input'?c.input:c.reading;return c});
  let clock=1000, callbacks;
  const values=[.4,.35,.15,.5,'Unhealthy',0,'SAVED: node=NODE_001; Custom',preset,unknown?'':nodeId,'Bed A','Tomato'].map((value,index)=>({index,value:String(value),lastUpdated:100}));
  if(partial)values[2].value='';
+ if(blankDescription)values[9].value=null;
  if(missingTimestamp)values[6].lastUpdated=null;
  const writes=[],links=[];
  class Bridge{
@@ -65,3 +66,4 @@ test('navigation does not retarget a dynamically identified node',async()=>{cons
 
 test('description displays V8 and updates without writes',async()=>{const w=await boot();assert.equal(w.ids.plantDescription.textContent,'Bed A');w.push({index:9,value:'North greenhouse bed',lastUpdated:200});assert.equal(w.ids.plantDescription.textContent,'North greenhouse bed');assert.equal(w.writes.length,0)});
 test('blank V8 and browser preview show the default description',async()=>{const w=await boot();w.push({index:9,value:'   ',lastUpdated:200});assert.equal(w.ids.plantDescription.textContent,'Monitor soil moisture and adjust irrigation settings for this plant.');assert.equal(w.writes.length,0);assert.equal(w.ids.applyBtn.disabled,true);const preview=await boot({live:false});assert.equal(preview.ids.plantDescription.textContent,w.ids.plantDescription.textContent)});
+test('unset V8 is an allowed empty description for Apply',async()=>{const w=await boot({blankDescription:true});w.change('mad',45);assert.equal(w.ids.applyBtn.disabled,false);await w.apply();assert.match(w.ids.message.textContent,/Saved to Edge/)});

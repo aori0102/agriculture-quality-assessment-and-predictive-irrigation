@@ -43,7 +43,7 @@ class ProfileClientTests(unittest.TestCase):
                                   node_id="node-1", profile_backend=self.backend)
         self.addCleanup(self.client.close)
 
-    def connect(self, codes=(1, 1, 1)):
+    def connect(self, codes=(1, 1, 1, 1)):
         self.client.start()
         self.network.on_connect(self.network, None, None, reason(PacketTypes.CONNACK), None)
         self.network.on_subscribe(self.network, None, 7,
@@ -61,6 +61,7 @@ class ProfileClientTests(unittest.TestCase):
         wait_until(lambda: self.client.profiles_ready)
         topics = self.network.subscribe.call_args.args[0]
         self.assertEqual(topics, [(BlynkTopics.PUMP_COMMAND, 1),
+                                 (BlynkTopics.AUTO_IRRIGATION_ENABLED, 1),
                                  (BlynkTopics.APPLY_PROFILE, 1), (BlynkTopics.PROFILE_PRESET, 1)])
         self.receive(BlynkTopics.APPLY_PROFILE)
         self.receive(BlynkTopics.PUMP_COMMAND)
@@ -85,7 +86,7 @@ class ProfileClientTests(unittest.TestCase):
         self.assertIn("UNCONFIGURED", self.client.last_profile_status)
 
     def test_rejected_profile_subscription_prevents_restoration(self):
-        self.connect((1, 128, 1))
+        self.connect((1, 128, 1, 1))
         self.assertFalse(self.client.profiles_ready)
         self.assertEqual(self.client.last_command_error.category, "subscription")
         self.session.get.assert_not_called()
@@ -96,7 +97,8 @@ class ProfileClientTests(unittest.TestCase):
         self.addCleanup(client.close)
         client.start()
         self.network.on_connect(self.network, None, None, reason(PacketTypes.CONNACK), None)
-        self.assertEqual(self.network.subscribe.call_args.args, (BlynkTopics.PUMP_COMMAND,))
+        self.assertEqual(self.network.subscribe.call_args.args[0], [(BlynkTopics.PUMP_COMMAND, 1),
+                                                                    (BlynkTopics.AUTO_IRRIGATION_ENABLED, 1)])
         self.assertFalse(client.profiles_ready)
         self.assertIsNone(client.last_profile_error)
         self.assertEqual(client.last_profile_status, "")

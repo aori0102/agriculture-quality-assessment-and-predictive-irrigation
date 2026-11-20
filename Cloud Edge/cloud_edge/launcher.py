@@ -76,6 +76,7 @@ def run_with_clients(
     provisioning=None,
     telemetry_handler=None,
     reporter=None,
+    pump_coordinator=None,
     instance_lock=None,
 ):
     """One shared adapter across all devices; close even after partial startup."""
@@ -124,6 +125,24 @@ def run_with_clients(
         if reporter is not None:
             reporter.configure(clients)
             resources.callback(reporter.close)
+
+        def report_initial_state(node_id):
+            if reporter is None or pump_coordinator is None:
+                return
+            reporter.submit("report_control_mode", node_id=node_id,
+                            enabled=pump_coordinator.auto_enabled(node_id))
+            reporter.submit("report_pump_detail", node_id=node_id,
+                            detail="unknown: awaiting device state")
+
+        if reporter is not None and pump_coordinator is not None:
+            for node_id, _ in clients.snapshot():
+                report_initial_state(node_id)
+
+        def activated(node_id, snapshot):
+            if reporter is not None:
+                reporter.submit("send_telemetry", node_id=node_id, **snapshot)
+                report_initial_state(node_id)
+
         if provisioning is not None:
             worker = DeviceProvisioningWorker(
                 edge_id=provisioning["edge_id"],
@@ -133,8 +152,7 @@ def run_with_clients(
                 provisioner=BlynkProvisioner(provisioning["oauth_store"]),
                 client_factory=client_factory,
                 profile_backend=backend,
-                on_ready=(lambda node_id, snapshot: reporter.submit(
-                    "send_telemetry", node_id=node_id, **snapshot)) if reporter is not None else None,
+                on_ready=activated if reporter is not None else None,
             )
             resources.callback(worker.close)  # Stop before closing clients.
             worker.start()
@@ -244,6 +262,7 @@ def main(argv=None) -> int:
         )
         return 2
     operation_lock = RLock()
+    app.pump_coordinator.lock = operation_lock
     backend = EdgeProfileBackend(
         proxy.update_node_profile,
         proxy.operation_log_manager.load_log,
@@ -254,6 +273,10 @@ def main(argv=None) -> int:
         proxy.disable_irrigation_on_node,
         proxy.operation_log_manager.load_log,
         operation_lock=operation_lock,
+        control_request=lambda node_id, control, enabled: (
+            app.pump_coordinator.request_auto(node_id, enabled) if control == "auto"
+            else app.pump_coordinator.request_manual(node_id, enabled)
+        ),
     )
     try:
         handler = importlib.import_module(
@@ -267,6 +290,7 @@ def main(argv=None) -> int:
             provisioning=provisioning,
             telemetry_handler=handler,
             reporter=reporter,
+            pump_coordinator=app.pump_coordinator,
             instance_lock=REPOSITORY / "Cloud Edge/runtime/edge.lock",
         )
     except KeyboardInterrupt:
