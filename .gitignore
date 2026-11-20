@@ -230,3 +230,4 @@ yolov8x-cls.pt
 /AI/ComputerVision/output/
 /AI/IrrigationPrediction/models/
 /AI/IrrigationPrediction/data_log.csv
+/Cloud Edge/runtime/

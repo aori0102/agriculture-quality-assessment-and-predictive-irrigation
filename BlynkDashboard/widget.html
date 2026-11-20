@@ -14,29 +14,31 @@
   .profile-controls{display:flex;gap:7px;align-items:center}.profile-select{border:1px solid #56745e;color:var(--fg);background:#283e2f;border-radius:9px;max-width:220px;min-height:38px;padding:8px}.outline{border:1px solid #58715e;background:transparent;color:#d0e4d3;border-radius:9px;min-height:38px;padding:8px 12px;cursor:pointer}.outline:hover{background:#2b4031}
   .content{padding:15px;display:grid;gap:13px}.summary{display:grid;grid-template-columns:114px minmax(0,1fr);align-items:center;gap:14px;background:#1b3024;border:1px solid var(--line);padding:11px;border-radius:12px}
   .plant-art{background:radial-gradient(ellipse at center,#376746,#22422e 70%);height:121px;border-radius:10px;display:flex;align-items:center;justify-content:center}.status{display:inline-flex;gap:5px;align-items:center;border:1px solid #4d8b60;color:#b7e8be;background:#255338;font-size:10px;border-radius:18px;padding:4px 10px;font-weight:720}.status.warning{border-color:#80653f;color:#f0d093;background:#4b3b27}.status.unknown{border-color:#556959;color:#d0d9d0;background:#2a3a2d}
-  .nodeid{font-size:10px;color:var(--muted);letter-spacing:.3px}.plantname{font-size:22px;font-weight:760;letter-spacing:-.5px;margin-top:7px}.species{font-size:11px;color:var(--muted);font-style:italic;margin-top:1px}.stats{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:11px}.stat{background:#294334;border-radius:7px;padding:7px 9px}.stat small{font-size:10px;color:#adbeae}.stat strong{display:block;font-size:12px;margin-top:3px}
+  .nodeid{font-size:10px;color:var(--muted);letter-spacing:.3px}.plantname{font-size:22px;font-weight:760;letter-spacing:-.5px;margin-top:7px}.plant-description{font-size:11px;color:var(--muted);overflow-wrap:anywhere;margin-top:5px}.stats{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:11px}.stat{background:#294334;border-radius:7px;padding:7px 9px}.stat small{font-size:10px;color:#adbeae}.stat strong{display:block;font-size:12px;margin-top:3px}
   .sectionhead{display:flex;justify-content:space-between;gap:10px;align-items:center}.sectiontitle{font-size:14px;font-weight:770}.count{background:#2a4432;color:#b8dbbb;border-radius:6px;padding:5px 8px;font-size:10px}.params{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.parameter{min-width:0;border:1px solid var(--line);background:var(--panel);padding:14px;border-radius:12px}.paramhead{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}.paramtitle{font-size:12px;font-weight:730}.paramdesc{min-height:30px;font-size:10px;color:var(--muted);margin-top:3px}.value{font-weight:790;color:var(--accent);font-size:24px;white-space:nowrap;letter-spacing:-.7px}.unit{font-size:11px;color:#99c4a2;letter-spacing:0}.parameter input{width:100%;accent-color:var(--accent);margin:14px 0 3px;cursor:pointer}.limits{display:flex;justify-content:space-between;color:#889e8f;font-size:10px}
   .controls{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:14px}.feedback{font-size:11px;color:#b9cfbf}.feedback:before{content:'●';margin-right:6px;color:#70ca84}.feedback.dirty:before{color:#e9c178}.feedback.error:before{color:#ed9a8e}.hint{font-size:10px;color:var(--muted);margin-top:3px}.actions{display:flex;gap:8px}.primary{background:var(--accent);color:#15251a;border:1px solid var(--accent);font-weight:790;border-radius:9px;min-height:40px;padding:10px 16px;cursor:pointer}.primary:disabled{cursor:default;opacity:.45}.message{font-size:11px;min-height:18px;color:#c3d7c6}.message.error{color:#f0aa9d}.notice{border-top:1px solid #263c2f;color:#799482;text-align:center;font-size:9px;letter-spacing:.6px;padding-top:11px}
+  .name-row{display:flex;align-items:center;gap:8px;min-width:0}.name-row .plantname{overflow-wrap:anywhere}.name-edit{font-size:11px;min-height:30px;padding:4px 8px;flex-shrink:0}.name-input{width:100%;margin-top:8px;padding:8px;border:1px solid var(--accent);border-radius:7px;background:var(--panel);color:var(--fg)}
   @media(max-width:490px){.params{grid-template-columns:1fr}.paramdesc{min-height:0}.head{padding:14px}.content{padding:11px}.summary{grid-template-columns:88px minmax(0,1fr);gap:9px}.plant-art{height:108px}.plantname{font-size:19px}.heading{font-size:18px}.profile-select{max-width:170px}}@media(max-width:320px){.summary{grid-template-columns:1fr}.plant-art{height:92px}}
 </style>
 </head>
 <body>
 <div class="widget">
  <header class="head"><div class="head-inner">
-  <div><div class="overline">GREENHOUSE / CONTROL</div><div class="heading">Plant Profile <span style="font-weight:400;color:#84b28b">/ <span id="profileNumber">01</span></span></div><div class="desc">Plant information & irrigation configuration</div></div>
-  <div><label class="desc" for="profileSelect" style="display:block;margin:0 0 5px">ACTIVE PROFILE</label><div class="profile-controls"><select class="profile-select" id="profileSelect" aria-label="Select a plant profile"></select><button id="openProfile" class="outline" type="button" title="Open the selected device dashboard">Open ↗</button></div></div>
+  <div><div class="overline">GREENHOUSE / CONTROL</div><div class="heading">Plant Profile</div><div class="desc">Plant information & irrigation configuration</div></div>
+  <div><label class="desc" for="profileSelect" style="display:block;margin:0 0 5px">GO TO PROFILE</label><div class="profile-controls"><select class="profile-select" id="profileSelect" aria-label="Select a plant profile"></select><button id="openProfile" class="outline" type="button" title="Open the selected device dashboard">Open ↗</button></div></div>
  </div></header>
  <main class="content">
   <section class="summary" aria-label="Plant overview">
    <div class="plant-art"><svg width="104" height="112" viewBox="0 0 110 125" role="img" aria-label="Illustrated potted plant"><ellipse cx="56" cy="113" rx="36" ry="5" fill="#112a19" opacity=".55"/><path d="M32 80H80L73 108Q56 114 39 108Z" fill="#bf825d"/><path d="M31 80H81" stroke="#e1a17b" stroke-width="7" stroke-linecap="round"/><path d="M55 79Q50 49 56 19" stroke="#85c485" stroke-width="4" fill="none"/><path d="M54 46Q28 18 12 38Q22 59 54 46Z" fill="#67ad73"/><path d="M54 63Q84 32 100 51Q81 76 54 63Z" fill="#4a9d62"/><path d="M56 30Q72 9 87 18Q79 40 56 30Z" fill="#81c58c"/><path d="M56 22Q42 0 29 12Q33 34 56 22Z" fill="#78ba83"/><path d="M54 46L17 38M54 63L97 51" stroke="#3b8250" stroke-width="1.4" fill="none"/><circle cx="44" cy="67" r="7" fill="#e9a264"/><path d="M42 60l3 2 4-3" stroke="#468e57" stroke-width="2" fill="none"/></svg></div>
-   <div style="min-width:0"><div style="display:flex;flex-wrap:wrap;gap:9px;align-items:center"><span id="plantHealth" class="status unknown">● Unknown</span><span id="nodeId" class="nodeid">NODE_001</span></div><div id="plantName" class="plantname">Tomato</div><div id="species" class="species">Solanum lycopersicum</div><div class="stats"><div class="stat"><small>Growth stage</small><strong id="growthStage">Vegetative</strong></div><div class="stat"><small>Configuration</small><strong id="configState">Not connected</strong></div></div></div>
+   <div style="min-width:0"><div style="display:flex;flex-wrap:wrap;gap:9px;align-items:center"><span id="plantHealth" class="status unknown">● Unknown</span><span id="nodeId" class="nodeid">NODE_001</span></div><div class="name-row"><div id="plantName" class="plantname">Tomato</div><button id="editNameBtn" class="outline name-edit" type="button" aria-label="Edit plant name" aria-controls="plantNameInput" aria-expanded="false">✎ Edit</button></div><input id="plantNameInput" class="name-input" type="text" maxlength="128" aria-label="Plant name" placeholder="Enter plant name" hidden><div id="plantDescription" class="plant-description"></div><div class="stats"><div class="stat"><small>Growth stage</small><strong id="growthStage">Vegetative</strong></div><div class="stat"><small>Configuration</small><strong id="configState">Not connected</strong></div></div></div>
   </section>
   <div class="sectionhead"><div><div class="sectiontitle">Irrigation Configuration</div><div class="desc">Adjust values, then apply them together</div></div><span class="count">4 PARAMETERS</span></div>
+  <div id="setupMessage" class="message" role="status" aria-live="polite"></div>
   <section class="params" aria-label="Irrigation parameters">
-   <div class="parameter" data-key="mad"><div class="paramhead"><div><div class="paramtitle">MAD</div><div class="paramdesc">Management Allowed Depletion</div></div><div class="value"><span class="reading">40</span><span class="unit">%</span></div></div><input type="range" min="0" max="100" step="1" value="40" aria-label="MAD percent"><div class="limits"><span>0%</span><span>100%</span></div></div>
-   <div class="parameter" data-key="fc"><div class="paramhead"><div><div class="paramtitle">Field Capacity</div><div class="paramdesc">Volumetric water content after drainage</div></div><div class="value"><span class="reading">35</span><span class="unit">%</span></div></div><input type="range" min="0" max="100" step="1" value="35" aria-label="Field Capacity percent"><div class="limits"><span>0%</span><span>100%</span></div></div>
-   <div class="parameter" data-key="pwp"><div class="paramhead"><div><div class="paramtitle">Wilting Point (PWP)</div><div class="paramdesc">Permanent wilting water content</div></div><div class="value"><span class="reading">15</span><span class="unit">%</span></div></div><input type="range" min="0" max="100" step="1" value="15" aria-label="Permanent Wilting Point percent"><div class="limits"><span>0%</span><span>100%</span></div></div>
-   <div class="parameter" data-key="sat"><div class="paramhead"><div><div class="paramtitle">Saturation Point</div><div class="paramdesc">Water content when soil pores are saturated</div></div><div class="value"><span class="reading">50</span><span class="unit">%</span></div></div><input type="range" min="0" max="100" step="1" value="50" aria-label="Saturation Point percent"><div class="limits"><span>0%</span><span>100%</span></div></div>
+   <div class="parameter" data-key="mad"><div class="paramhead"><div><div class="paramtitle">MAD</div><div class="paramdesc">Management Allowed Depletion</div></div><div class="value"><span class="reading">40</span><span class="unit">%</span></div></div><input type="range" min="0" max="100" step="0.1" value="40" aria-label="MAD percent"><div class="limits"><span>0%</span><span>100%</span></div></div>
+   <div class="parameter" data-key="fc"><div class="paramhead"><div><div class="paramtitle">Field Capacity (FC)</div><div class="paramdesc">Volumetric water content after drainage</div></div><div class="value"><span class="reading">35</span><span class="unit">%</span></div></div><input type="range" min="0" max="100" step="0.1" value="35" aria-label="Field Capacity percent"><div class="limits"><span>0%</span><span>100%</span></div></div>
+   <div class="parameter" data-key="pwp"><div class="paramhead"><div><div class="paramtitle">Wilting Point (PWP)</div><div class="paramdesc">Permanent wilting water content</div></div><div class="value"><span class="reading">15</span><span class="unit">%</span></div></div><input type="range" min="0" max="100" step="0.1" value="15" aria-label="Permanent Wilting Point percent"><div class="limits"><span>0%</span><span>100%</span></div></div>
+   <div class="parameter" data-key="sat"><div class="paramhead"><div><div class="paramtitle">Saturation Point (SAT)</div><div class="paramdesc">Water content when soil pores are saturated</div></div><div class="value"><span class="reading">50</span><span class="unit">%</span></div></div><input type="range" min="0" max="100" step="0.1" value="50" aria-label="Saturation Point percent"><div class="limits"><span>0%</span><span>100%</span></div></div>
   </section>
   <div class="controls"><div><div id="saveState" class="feedback">Loading configuration</div><div class="hint">Changes remain local until Apply</div></div><div class="actions"><button id="resetBtn" type="button" class="outline">Reset</button><button id="applyBtn" type="button" class="primary" disabled>Apply Changes</button></div></div>
   <div id="message" role="status" aria-live="polite" class="message"></div><div id="footerMode" class="notice">INITIALIZING</div>
@@ -45,126 +47,179 @@
 <script>
 (function(){
  'use strict';
- /* =====================================================================
-    CONFIGURE BEFORE USING IN BLYNK
-    ---------------------------------------------------------------------
-    Assign these datastreams to the HTML Widget IN THIS EXACT ORDER:
-       index 0: V10 MAD, Double/Integer (%), read current applied config
-       index 1: V11 FC, Double/Integer (%), read current applied config
-       index 2: V12 PWP, Double/Integer (%), read current applied config
-       index 3: V13 SAT, Double/Integer (%), read current applied config
-       index 4: V14 Plant Status, String, e.g. "Healthy"
-       index 5: V15 Config Command, String, Edge subscribes to this
-       index 6: V16 Config ACK, String, Edge publishes confirmation
-
-    Apply writes ONE JSON message to index 5, not four individual writes.
-    Edge must validate, persist and then publish the four applied values,
-    followed by an ACK JSON with the matching request_id and status "ok".
-    BlynkBridge sendValue() is fire-and-forget. Never equate it to success.
-    Replace dashboardUrl with the FULL URL copied for each actual device.
-    Window/tab navigation may be restricted by Blynk iframe sandbox.
-    ===================================================================== */
- const PROFILE_CATALOG = [
-  {id:'4317587',nodeId:'NODE_001',number:'01',name:'Tomato',species:'Solanum lycopersicum',stage:'Vegetative',dashboardUrl:'https://sgp1.blynk.cloud/dashboard/1181191/global/devices/474839/organization/1181191/devices/4317587/dashboard',demo:{mad:40,fc:35,pwp:15,sat:50},health:'Healthy'},
-  {id:'REPLACE_DEVICE_ID_2',nodeId:'NODE_002',number:'02',name:'Lettuce',species:'Lactuca sativa',stage:'Leaf development',dashboardUrl:'',demo:{mad:30,fc:37,pwp:16,sat:52},health:'Healthy'},
-  {id:'REPLACE_DEVICE_ID_3',nodeId:'NODE_003',number:'03',name:'Basil',species:'Ocimum basilicum',stage:'Vegetative',dashboardUrl:'',demo:{mad:35,fc:33,pwp:13,sat:48},health:'Needs attention'}
+ /* Bind in this order: V11 MAD, V12 FC, V10 PWP, V13 SAT, V2 health,
+    V14 Apply, V15 status, V16 preset, V7 node, V8 description, V9 plant name.
+    Threshold streams use fractions 0–1; this UI displays percentages.
+    Apply writes a Custom draft, verifies readback, then sends V14=1.
+    The backend owns resetting V14. Use one editor per device.
+    Node identity comes from V7; navigation labels/links are independent.
+    See README.md for setup and scalar-protocol confirmation limitations. */
+ const PROFILE_LINKS = [
+  {label:'Plant 01',dashboardUrl:'https://sgp1.blynk.cloud/dashboard/1181191/global/devices/474839/organization/1181191/devices/4317587/dashboard'},
+  {label:'Plant 02',dashboardUrl:'https://sgp1.blynk.cloud/dashboard/1181191/global/devices/474839/organization/1181191/devices/4333323/dashboard'},
  ];
- const INDEX={mad:0,fc:1,pwp:2,sat:3,health:4,command:5,ack:6};
+ const DEFAULT_DESCRIPTION='Monitor soil moisture and adjust irrigation settings for this plant.';
+ const DEMO={nodeId:'DEMO_NODE',name:'Demo plant',mad:40,fc:35,pwp:15,sat:50};
+ const KEYS=['mad','fc','pwp','sat'];
+ // Widget positions, NOT virtual pins. See README.md for the binding table.
+ const INDEX={mad:0,fc:1,pwp:2,sat:3,health:4,apply:5,status:6,preset:7,node:8,description:9,name:10};
  const $=s=>document.querySelector(s);
  const bridge=typeof BlynkBridge==='function'?new BlynkBridge({logEnabled:false,isOnErrorEnabled:true}):null;
- const LIVE=!!(bridge && bridge.isBridgeAvailable());
- const mockSaved=Object.fromEntries(PROFILE_CATALOG.map(p=>[p.id,{...p.demo}]));
- let current=PROFILE_CATALOG[0];
- let saved={...current.demo},draft={...saved};
- let awaitingAck=null,ackTimer=null,initialized=false,hasCloudConfig=false,lastLiveUpdate=0;
- function message(text,error){const el=$('#message');el.textContent=text||'';el.classList.toggle('error',!!error)}
- function dirty(){return Object.keys(INDEX).filter(k=>k in draft).some(k=>draft[k]!==saved[k])}
- function valid(x){return x.mad>=0&&x.mad<=100&&x.pwp>=0&&x.pwp<x.fc&&x.fc<x.sat&&x.sat<=100}
- function changeStatus(status){const el=$('#plantHealth');const s=String(status||'Unknown').trim()||'Unknown';el.textContent=(/healthy/i.test(s)?'● ':'▲ ')+s;el.className='status '+(/healthy/i.test(s)?'':/unknown/i.test(s)?'unknown':'warning')}
- function render(){
-  $('#profileNumber').textContent=current.number;$('#nodeId').textContent=current.nodeId;$('#plantName').textContent=current.name;$('#species').textContent=current.species;$('#growthStage').textContent=current.stage;
-  for(const k of ['mad','fc','pwp','sat']){const card=document.querySelector('[data-key="'+k+'"]');card.querySelector('input').value=draft[k];card.querySelector('.reading').textContent=draft[k]}
-  const pending=!!awaitingAck;const isDirty=dirty();
-  $('#saveState').textContent=pending?'Awaiting Edge confirmation':isDirty?'Unsaved changes':!LIVE?'Saved locally · Demo':hasCloudConfig?'Cloud configuration loaded':'Cloud configuration not loaded';
-  $('#saveState').className='feedback'+(isDirty?' dirty':'');
-  $('#configState').textContent=pending?'Pending':isDirty?'Modified':!LIVE?'Demo':hasCloudConfig?'Configured':'Unknown';
-  $('#configState').style.color=isDirty?'#f0c986':'#b0efb6';
-  $('#applyBtn').disabled=pending||!initialized||!isDirty|| (LIVE&&!hasCloudConfig);
-  $('#resetBtn').disabled=pending||!initialized;
-  $('#footerMode').textContent=LIVE?'BLYNK LIVE · DEVICE DATASTREAMS':'BROWSER PREVIEW · DEMO DATA ONLY';
+ const LIVE=!!(bridge&&bridge.isBridgeAvailable());
+ let nodeId=null,initialized=false,nodeChanged=false;
+ let saved=LIVE?{}:{...DEMO},draft={...saved},cstreams=new Map(),pending=null;
+ let editingName=false,editStartName='';
+ const pushed=new Set();
+ function message(text,error=false){$('#message').textContent=text;$('#message').classList.toggle('error',error)}
+ function number(raw){return (typeof raw==='number'||(typeof raw==='string'&&raw.trim()!==''))?Number(raw):NaN}
+ function valid(x){return KEYS.every(k=>Number.isFinite(x[k]))&&x.mad>0&&x.mad<100&&x.pwp>=0&&x.pwp<x.fc&&x.fc<x.sat&&x.sat<=100}
+ function dirty(){return draft.name!==saved.name||KEYS.some(k=>!Object.is(draft[k],saved[k]))}
+ function setupIssue(){
+  if(!LIVE)return '';
+  if(nodeChanged)return 'Apply unavailable: V7 node identity changed; reload before editing this node.';
+  if(!validName(nodeId))return 'Apply unavailable: waiting for V7 node_id (1–128 printable characters) from Cloud Edge.';
+  const missing=Object.values(INDEX).filter(i=>!streams.has(i));
+  if(missing.length)return 'Apply unavailable: missing widget bindings at indexes '+missing.join(', ')+'. Assign all 11 streams.';
+
+  if(![0,1].includes(number(streams.get(INDEX.preset)?.value)))return 'Apply unavailable: V16 profile_preset must be 0 (Custom) or 1 (Lettuce).';
+  if(!validName(draft.name))return 'Enter a plant name: 1–128 printable characters.';
+  if(typeof streams.get(INDEX.description)?.value!=='string')return 'Apply unavailable: V8 node_description must contain text (an empty string is allowed).';
+  return '';
  }
- function loadLocal(profile){current=profile;saved={...mockSaved[profile.id]};draft={...saved};changeStatus(profile.health);render()}
- function applyStreamValue(item){
-  const i=Number(item.index);const raw=item.value;
-  if(i>=0 && i<=3){const key=['mad','fc','pwp','sat'][i];const val=Number(raw);if(Number.isFinite(val)&&val>=0&&val<=100){const old=saved[key];saved[key]=val;hasCloudConfig=true;if(!dirty()||draft[key]===old)draft[key]=val}}
-  if(i===INDEX.health)changeStatus(raw);
-  if(i===INDEX.ack){let ack;try{ack=JSON.parse(raw)}catch(_){return}if(awaitingAck&&String(ack.request_id)===awaitingAck.request_id){
-    if(ack.status==='ok'){
-      // ACK is authoritative; use returned applied config when provided.
-      const newConfig=ack.config&&typeof ack.config==='object'?ack.config:awaitingAck.config;
-      saved={...saved,...newConfig};draft={...saved};hasCloudConfig=true;
-      message('Configuration confirmed and saved by Edge Server.');
-    }else{message('Edge rejected configuration: '+String(ack.message||'invalid request'),true)}
-    clearTimeout(ackTimer);ackTimer=null;awaitingAck=null;render();
-  }}
+ function ready(){return !setupIssue()}
+ function validName(name){return typeof name==='string'&&!!name.trim()&&[...name].length<=128&&!/[\p{C}\p{Zl}\p{Zp}]/u.test(name)&&![...name].some(c=>/\p{Zs}/u.test(c)&&c!==' ')}
+ function changeStatus(status){const s=String(status||'Unknown');$('#plantHealth').textContent=s;$('#plantHealth').className='status '+(/^healthy$/i.test(s)?'':/^unknown$/i.test(s)?'unknown':'warning')}
+ function render(){
+  $('#nodeId').textContent=LIVE?(nodeId||'Waiting for node ID'):DEMO.nodeId;
+  $('#plantName').textContent=draft.name||'Unnamed plant';
+  $('#plantNameInput').hidden=!editingName;$('#plantNameInput').disabled=!!pending;
+  if($('#plantNameInput').value!==(draft.name??''))$('#plantNameInput').value=draft.name??'';
+  $('#editNameBtn').disabled=!!pending;$('#editNameBtn').textContent=editingName?'Done':'✎ Edit';
+  $('#editNameBtn').setAttribute('aria-expanded',String(editingName));
+  const description=streams.get(INDEX.description)?.value;
+  $('#plantDescription').textContent=typeof description==='string'&&description.trim()?description:DEFAULT_DESCRIPTION;
+  $('#growthStage').textContent='Not reported';
+  for(const key of KEYS){const card=document.querySelector('[data-key="'+key+'"]');const input=card.querySelector('input');input.value=draft[key]??0;input.disabled=!!pending;card.querySelector('.reading').textContent=Number.isFinite(draft[key])?Number(draft[key].toFixed(3)):'—'}
+  $('#saveState').textContent=pending?'Submitting configuration':dirty()?'Unapplied changes':LIVE?'Loaded dashboard values':'Saved locally · Demo';
+  $('#saveState').className='feedback'+(dirty()?' dirty':'');
+  $('#configState').textContent=pending?'Pending':dirty()?'Modified':LIVE?'Loaded':'Demo';
+  $('#applyBtn').disabled=!!pending||!initialized||!dirty()||!valid(draft)||!validName(draft.name)||(LIVE&&!ready());
+  const issue=setupIssue();
+  $('#setupMessage').textContent=!initialized?'Loading device data; slider edits stay local.':issue||(!valid(draft)?'Set all four values: 0 < MAD < 100 and 0 ≤ PWP < FC < SAT ≤ 100%.':'Slider edits stay local until you click Apply.');
+  $('#setupMessage').classList.toggle('error',!!issue);
+  $('#resetBtn').disabled=!!pending||!initialized;
+  $('#profileSelect').disabled=!!pending;$('#openProfile').disabled=!!pending;
+  $('#footerMode').textContent=LIVE?'BLYNK · ONE EDITOR PER DEVICE':'BROWSER PREVIEW · DEMO DATA ONLY';
+ }
+ // Lock identity after the first valid V7 value; do not retarget an existing draft.
+ function observeNode(value){
+  if(nodeId!==null&&value!==nodeId){
+   nodeChanged=true;
+   if(pending)pending.error='Node identity changed; reload before retrying.';
+  }else if(nodeId===null&&validName(value)){nodeId=value}
+ }
+ function update(item){
+  if(!item||!Number.isInteger(item.index))return;
+  const old=streams.get(item.index);
+  if(Number.isFinite(old?.lastUpdated)&&Number.isFinite(item.lastUpdated)&&item.lastUpdated<old.lastUpdated)return;
+  streams.set(item.index,item);
+  if(item.index===INDEX.node)observeNode(item.value);
+  if(item.index===INDEX.health)changeStatus(item.value);
+  if(!pending&&item.index===INDEX.name){const untouched=draft.name===saved.name;saved.name=typeof item.value==='string'?item.value:'';if(untouched)draft.name=saved.name}
+  if(!pending&&item.index<4){const key=KEYS[item.index],value=number(item.value)*100,untouched=Object.is(draft[key],saved[key]);saved[key]=value;if(untouched)draft[key]=value}
+  if(!pending&&item.index===INDEX.status)message(String(item.value||''));
   render();
  }
- function parseInitial(values){
-  if(!Array.isArray(values)||values.length<7){message('Assign all 7 datastreams to this HTML Widget in the documented order.',true);return}
-  values.filter(v=>v.index!==INDEX.ack).forEach(applyStreamValue);
-  if(hasCloudConfig)message('Live configuration loaded.');
+ async function snapshot(){
+  const values=await bridge.getValues();
+  if(!Array.isArray(values))throw new Error('Could not read datastreams.');
+  const map=new Map(values.filter(v=>v&&Number.isInteger(v.index)).map(v=>[v.index,v]));
+  if(!Object.values(INDEX).every(i=>map.has(i)))throw new Error('Assign all 11 datastreams in the documented order.');
+  if(initialized)observeNode(map.get(INDEX.node).value);
+  return map;
  }
- function onProfileChosen(){
-  const p=PROFILE_CATALOG.find(x=>x.id===$('#profileSelect').value);if(!p)return;
-  if(p.id===current.id)return;
-  if(dirty()&&!window.confirm('Discard unapplied changes and switch profiles?')){$('#profileSelect').value=current.id;return}
-  // Do not fabricate a cloud switch: each Blynk Device dashboard is separate.
-  if(LIVE){message('Choose Open ↗ to navigate to '+p.name+' dashboard. Your current widget remains bound to its current device.');return}
-  loadLocal(p);message('Demo profile changed to '+p.name+'. Open ↗ uses its configured dashboard URL.');
+ function check(operation){if(nodeChanged)throw new Error('Node identity changed; reload before retrying.');if(pending!==operation||operation.error)throw new Error(operation.error||'Submission cancelled.');if(Date.now()>operation.deadline)throw new Error('Timed out; saving is not confirmed. Reload and inspect Edge status before retrying.')}
+ async function waitFor(operation,predicate){
+  while(true){check(operation);const values=await snapshot();check(operation);if(predicate(values))return values;await new Promise(resolve=>setTimeout(resolve,500))}
+ }
+ function send(operation,index,value){check(operation);bridge.sendValue(index,value);check(operation)}
+ function freshStatus(values,baseline){const item=values.get(INDEX.status);return Number.isFinite(item?.lastUpdated)&&item.lastUpdated>baseline?String(item.value):''}
+ function sameForm(values,expected,metadata){return KEYS.every(k=>Math.abs(number(values.get(INDEX[k])?.value)-expected[k]/100)<1e-9)&&number(values.get(INDEX.preset)?.value)===0&&values.get(INDEX.name)?.value===expected.name&&[INDEX.node,INDEX.description].every(i=>values.get(i)?.value===metadata.get(i)?.value)}
+ async function apply(){
+  if(pending||!initialized||!dirty()||(LIVE&&!ready()))return;
+  if(!validName(draft.name)){message('Enter a plant name: 1–128 printable characters.',true);return}
+  if(!valid(draft)){message('Require 0 < MAD < 100 and 0 ≤ PWP < FC < SAT ≤ 100%.',true);return}
+  if(!LIVE){saved={...draft};message('Demo configuration saved locally.');render();return}
+  const operation={deadline:Date.now()+35000,error:null,nodeId},submitted={...draft};pending=operation;render();
+  try{
+   const initial=await snapshot();check(operation);
+   if(initial.get(INDEX.node).value!==operation.nodeId)throw new Error('Device/node mapping changed; reload before applying.');
+   if(number(initial.get(INDEX.apply).value)!==0)throw new Error('Another Apply is pending. Wait and reload.');
+   const preset=number(initial.get(INDEX.preset).value);
+   if(![0,1].includes(preset))throw new Error('Invalid profile preset.');
+   if(preset===1){
+    message('Switching to Custom…');
+    const baseline=initial.get(INDEX.status).lastUpdated;
+    send(operation,INDEX.preset,0);
+    await waitFor(operation,values=>{
+     const status=freshStatus(values,baseline);
+     if(/^(REJECTED|SYNC_FAILED):/.test(status))throw new Error(status);
+     return number(values.get(INDEX.preset).value)===0&&status.startsWith('DRAFT: Custom;');
+    });
+   }
+   message('Uploading draft and checking readback…');
+   for(const key of KEYS)send(operation,INDEX[key],submitted[key]/100);
+   if(initial.get(INDEX.name).value!==submitted.name)send(operation,INDEX.name,submitted.name);
+   const verified=await waitFor(operation,values=>sameForm(values,submitted,initial));
+   const baseline=verified.get(INDEX.status).lastUpdated;
+   if(!Number.isFinite(baseline))throw new Error('Status timestamp unavailable; Apply was not triggered.');
+   message('Waiting for Edge to save…');
+   send(operation,INDEX.apply,1);
+   let resultStatus='';
+   const result=await waitFor(operation,values=>{
+    const status=freshStatus(values,baseline);
+    if(/^(REJECTED|SYNC_FAILED):/.test(status))throw new Error(status);
+    // Restore/preset statuses are not an acknowledgment of this submission.
+    if(status.includes('unsaved drafts discarded'))throw new Error('Edge reconnected; saving is not confirmed. Reload before retrying.');
+    if(!/^(SAVED|APPLIED):/.test(status))return false;
+    if(!['SAVED: ','APPLIED: '].some(prefix=>status.startsWith(prefix+'node='+operation.nodeId+';')))return false;
+    if(!sameForm(values,submitted,initial))throw new Error('The form changed during Apply; saving is not confirmed.');
+    resultStatus=status;return true;
+   });
+   streams=result;saved={...submitted};draft={...saved};editingName=false;
+   message('Saved to Edge. '+resultStatus+' · Irrigation adoption is not confirmed by this widget.');
+  }catch(error){message(String(error.message||error),true)}
+  finally{pending=null;render()}
  }
  function openProfile(){
-  const p=PROFILE_CATALOG.find(x=>x.id===$('#profileSelect').value);
-  if(!p||!p.dashboardUrl){message('No dashboard URL configured for this profile. Edit PROFILE_CATALOG first.',true);return}
-  // Explicit user gesture. Blynk iframe sandbox may block popups.
-  const link=document.createElement('a');link.href=p.dashboardUrl;link.target='_blank';link.rel='noopener noreferrer';document.body.appendChild(link);link.click();link.remove();
-  message('Attempted to open '+p.name+' dashboard. If navigation is blocked, use Blynk Devices list.');
- }
- function apply(){
-  if(!valid(draft)){message('Invalid values: require 0 ≤ PWP < FC < SAT ≤ 100 and MAD between 0–100%.',true);return}
-  if(!dirty())return;
-  if(!LIVE){saved={...draft};mockSaved[current.id]={...draft};message('Demo configuration saved locally (not sent to Blynk).');render();return}
-  if(!hasCloudConfig){message('Cloud configuration has not loaded. Apply disabled to avoid overwriting unknown values.',true);return}
-  const request_id='cfg-'+Date.now()+'-'+Math.random().toString(36).slice(2,8);
-  const config={...draft};awaitingAck={request_id,config};
-  try{bridge.sendValue(INDEX.command,JSON.stringify({type:'plant_config_update',request_id,node_id:current.nodeId,config}));message('Configuration sent. Waiting for Edge acknowledgment...');
-   ackTimer=setTimeout(()=>{if(awaitingAck&&awaitingAck.request_id===request_id){awaitingAck=null;message('No Edge acknowledgment within 20 seconds. Configuration is not confirmed.',true);render()}},20000);}
-  catch(err){awaitingAck=null;message('Could not submit configuration: '+String(err),true)}
-  render();
+  if(pending)return;
+  const selected=$('#profileSelect').value;
+  const profile=selected===''?null:PROFILE_LINKS[Number(selected)];
+  if(!profile||!/^https:\/\//.test(profile.dashboardUrl)){message('Configure an HTTPS dashboard link first.',true);return}
+  const link=document.createElement('a');link.href=profile.dashboardUrl;link.target='_blank';link.rel='noopener noreferrer';document.body.appendChild(link);link.click();link.remove();
+  message('Opened dashboard link in a new tab. This widget remains on its current device. If blocked, retry Open ↗.');
  }
  function initEvents(){
-  for(const p of PROFILE_CATALOG){const opt=document.createElement('option');opt.value=p.id;opt.textContent=p.number+' · '+p.name;$('#profileSelect').append(opt)}
-  $('#profileSelect').value=current.id;
-  $('#profileSelect').addEventListener('change',onProfileChosen);
+  const placeholder=document.createElement('option');placeholder.value='';placeholder.textContent='Go to profile…';$('#profileSelect').append(placeholder);
+  PROFILE_LINKS.forEach((profile,index)=>{const option=document.createElement('option');option.value=String(index);option.textContent=profile.label;$('#profileSelect').append(option)});
+  $('#profileSelect').value='';
+  $('#profileSelect').addEventListener('change',()=>{if(dirty()||pending){$('#profileSelect').value='';message('Apply or Reset before navigating.',true);return}openProfile()});
   $('#openProfile').addEventListener('click',openProfile);
-  for(const card of document.querySelectorAll('.parameter'))card.querySelector('input').addEventListener('input',e=>{draft[card.dataset.key]=Number(e.target.value);message('');render()});
-  $('#resetBtn').addEventListener('click',()=>{draft={...saved};message('Reverted unapplied changes.');render()});
+  for(const card of document.querySelectorAll('.parameter'))card.querySelector('input').addEventListener('input',event=>{if(pending)return;draft[card.dataset.key]=number(event.target.value);message('');render()});
+  $('#editNameBtn').addEventListener('click',()=>{if(pending)return;if(!editingName)editStartName=draft.name;editingName=!editingName;render();if(editingName)$('#plantNameInput').focus()});
+  $('#plantNameInput').addEventListener('input',()=>{if(pending)return;draft.name=$('#plantNameInput').value;message('');render()});
+  $('#plantNameInput').addEventListener('keydown',event=>{if(pending)return;if(event.key==='Enter'||event.key==='Escape'){event.preventDefault();if(event.key==='Escape')draft.name=editStartName;editingName=false;render();$('#editNameBtn').focus()}});
+  $('#resetBtn').addEventListener('click',()=>{if(pending)return;draft={...saved};editingName=false;message('Restored loaded values.');render()});
   $('#applyBtn').addEventListener('click',apply);
  }
  async function init(){
-  initEvents();changeStatus(current.health);
-  if(!LIVE){initialized=true;loadLocal(current);message('Preview mode: edit values, Apply, and switch demo profiles.');return}
-  // In live mode, the Blynk device owning this dashboard is authoritative.
-  $('#profileSelect').disabled=false;
-  bridge.setCallbacks({
-   onValueUpdated:item=>{lastLiveUpdate=Date.now();applyStreamValue(item)},
-   onError:err=>{message('Blynk: '+String(err),true);if(awaitingAck){awaitingAck=null;render()}}
-  });
+  initEvents();changeStatus('Unknown');render();
+  if(!LIVE){initialized=true;render();message('Preview mode: illustrative values, saved only in this page.');return}
+  bridge.setCallbacks({onValueUpdated:item=>{if(item)pushed.add(item.index);update(item)},onError:error=>{if(pending)pending.error=String(error);message('Blynk: '+String(error),true)}});
   try{
-   const info=await bridge.getDeviceInfo();
-   if(info&&info.id!=null){const match=PROFILE_CATALOG.find(p=>String(p.id)===String(info.id));if(match){current=match;$('#profileSelect').value=match.id}}
-  }catch(_){/* Device metadata is optional */}
-  render();
-  try{const values=await bridge.getValues();parseInitial(values)}catch(err){message('Could not read Blynk datastreams: '+String(err),true)}
+   const values=await snapshot();for(const [index,item] of values)if(!pushed.has(index))update(item);
+   if(!ready())message(setupIssue(),true);
+  }catch(error){message(String(error.message||error),true)}
   initialized=true;render();
  }
  init();

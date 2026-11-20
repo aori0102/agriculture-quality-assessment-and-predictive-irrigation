@@ -13,6 +13,8 @@ Cloud Edge includes an adapter to the existing AI proxy; it does not change irri
 
 ## Setup
 
+For optional approved-node device creation, see [Dynamic provisioning MVP](docs/DYNAMIC_PROVISIONING.md). It uses the independent Python MCP OAuth client and a separate private device store.
+
 From the repository root, using the project's virtual environment:
 
 ```bash

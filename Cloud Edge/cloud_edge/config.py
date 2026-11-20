@@ -87,7 +87,7 @@ class DeviceBinding:
     config: CloudConfig
 
 
-def load_device_bindings(values: Mapping[str, str] | None = None) -> tuple[DeviceBinding, ...]:
+def load_device_bindings(values: Mapping[str, str] | None = None, *, allow_empty: bool = False) -> tuple[DeviceBinding, ...]:
     """Load BLYNK_DEVICES_JSON and referenced tokens, without connecting.
 
     Each entry has node_id, server, auth_token_env. Explicit values are useful
@@ -97,10 +97,11 @@ def load_device_bindings(values: Mapping[str, str] | None = None) -> tuple[Devic
     if values is None:
         values = {**dotenv_values(ENV_FILE, interpolate=False), **os.environ}
     try:
-        entries = json.loads(values.get("BLYNK_DEVICES_JSON", ""))
+        raw = values.get("BLYNK_DEVICES_JSON", "")
+        entries = json.loads(raw) if raw else ([] if allow_empty else None)
     except (TypeError, ValueError):
         raise ValueError("BLYNK_DEVICES_JSON must be a nonempty JSON array.") from None
-    if not isinstance(entries, list) or not entries:
+    if not isinstance(entries, list) or (not entries and not allow_empty):
         raise ValueError("BLYNK_DEVICES_JSON must be a nonempty JSON array.")
     bindings, nodes, tokens = [], set(), set()
     for entry in entries:

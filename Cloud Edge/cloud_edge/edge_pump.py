@@ -91,7 +91,7 @@ class PumpDispatcher:
     def __init__(self, clients, backend: EdgePumpBackend, *, interval: float = .1):
         if type(interval) not in (int, float) or not 0 < interval < float('inf'):
             raise ValueError('Polling interval must be positive and finite.')
-        self._clients = dict(clients)
+        self._clients = clients
         self._backend, self._interval = backend, interval
         self._stop = Event()
         self._lock = Lock()
@@ -125,7 +125,8 @@ class PumpDispatcher:
 
     def _run(self):
         while not self._stop.is_set():
-            for node_id, client in self._clients.items():
+            clients = self._clients.snapshot() if hasattr(self._clients, 'snapshot') else tuple(self._clients.items())
+            for node_id, client in clients:
                 if self._stop.is_set():
                     break
                 try:

@@ -17,6 +17,8 @@ RAW_TELEMTRY_FIELDS = (
 
 
 class TelemetryHandler:
+    on_accepted = None  # Optional same-process Cloud hook; installed by launcher.
+
     def record_sensors_telemetry(self, message: mqtt.MQTTMessage, node_id: str) -> bool:
         """
         Record the sensor data from the MQTT message payload into data_log.csv
@@ -99,10 +101,16 @@ class TelemetryHandler:
             return False
 
         operation_log_manager.log_node(node_id)  # Record the node ID as acquired
-        cloud_reporter.submit(
-            "send_telemetry", node_id=node_id, soil_index_pct=soil_moisture_pct,
-            temperature_c=air_temp_c, air_humidity_pct=humidity_pct,
-        )
+        if self.on_accepted is not None:
+            try:
+                self.on_accepted(node_id, {
+                    "soil_index_pct": soil_moisture_pct,
+                    "temperature_c": air_temp_c,
+                    "air_humidity_pct": humidity_pct,
+                })
+            except Exception:
+                # Cloud failures must not invalidate accepted Edge telemetry.
+                pass
         return True
     
 
