@@ -7,6 +7,8 @@ from pathlib import Path
 import stat
 import tempfile
 
+from .platform_files import has_public_permissions, make_private, sync_directory
+
 from .config import CloudConfig
 
 
@@ -36,7 +38,7 @@ class DeviceStore:
         if not self.path.exists():
             return {}
         mode = self.path.lstat().st_mode
-        if not stat.S_ISREG(mode) or mode & 0o077:
+        if not stat.S_ISREG(mode) or has_public_permissions(mode):
             raise PermissionError("Device store must be a private regular file (0600).")
         data = json.loads(self.path.read_text(encoding="utf-8"))
         if not isinstance(data, dict) or data.get("schema_version") != 1 or not isinstance(data.get("devices"), dict):
@@ -52,7 +54,7 @@ class DeviceStore:
 
     def save(self, devices: dict[str, StoredDevice]) -> None:
         self.path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
-        if self.path.parent.stat().st_mode & 0o077:
+        if has_public_permissions(self.path.parent.stat().st_mode):
             raise PermissionError("Device store directory must be private (0700).")
         # Refuse to replace an unsafe file, including a symlink.
         self.load()
@@ -60,16 +62,12 @@ class DeviceStore:
         fd, name = tempfile.mkstemp(prefix=".devices-", dir=self.path.parent)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as stream:
-                os.fchmod(stream.fileno(), 0o600)
+                make_private(stream.fileno())
                 json.dump(payload, stream)
                 stream.flush()
                 os.fsync(stream.fileno())
             os.replace(name, self.path)
-            directory = os.open(self.path.parent, os.O_RDONLY)
-            try:
-                os.fsync(directory)
-            finally:
-                os.close(directory)
+            sync_directory(self.path.parent)
         finally:
             if os.path.exists(name):
                 os.unlink(name)
@@ -86,7 +84,7 @@ class CreateJournal:
             raise PermissionError("Create journal must not be a symlink.")
         if not self.path.exists():
             return set()
-        if not stat.S_ISREG(self.path.lstat().st_mode) or self.path.lstat().st_mode & 0o077:
+        if not stat.S_ISREG(self.path.lstat().st_mode) or has_public_permissions(self.path.lstat().st_mode):
             raise PermissionError("Create journal must be private (0600).")
         data = json.loads(self.path.read_text(encoding="utf-8"))
         if not isinstance(data, list) or any(not isinstance(node, str) for node in data):
@@ -95,22 +93,18 @@ class CreateJournal:
 
     def save(self, nodes: set[str]) -> None:
         self.path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
-        if self.path.parent.stat().st_mode & 0o077:
+        if has_public_permissions(self.path.parent.stat().st_mode):
             raise PermissionError("Create journal directory must be private (0700).")
         self.load()
         fd, name = tempfile.mkstemp(prefix=".create-", dir=self.path.parent)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as stream:
-                os.fchmod(stream.fileno(), 0o600)
+                make_private(stream.fileno())
                 json.dump(sorted(nodes), stream)
                 stream.flush()
                 os.fsync(stream.fileno())
             os.replace(name, self.path)
-            directory = os.open(self.path.parent, os.O_RDONLY)
-            try:
-                os.fsync(directory)
-            finally:
-                os.close(directory)
+            sync_directory(self.path.parent)
         finally:
             if os.path.exists(name):
                 os.unlink(name)

@@ -31,10 +31,12 @@ class StoreTests(unittest.TestCase):
             second = FileTokenStorage(path, FakeModel, FakeModel)
             self.assertEqual(asyncio.run(second.get_client_info()).value["client_id"], "test")
             self.assertEqual(asyncio.run(second.get_tokens()).value["access_token"], "secret")
-            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
-            self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
+            if os.name != "nt":
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
             self.assertIsNotNone(second.seconds_until_expiry())
 
+    @unittest.skipIf(os.name == "nt", "POSIX permission bits only")
     def test_rejects_public_or_symlink_store(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary) / "private"
