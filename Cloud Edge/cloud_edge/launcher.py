@@ -3,16 +3,15 @@
 import argparse
 from configparser import ConfigParser
 from contextlib import ExitStack
-import fcntl
 import importlib
 import json
 import os
 from pathlib import Path
-import stat
 import sys
 from threading import RLock
 from dotenv import dotenv_values
 
+from .platform_files import acquire_instance_lock
 from .client import CloudClient
 from .config import CloudConfig, ENV_FILE, ensure_env_file, load_device_bindings
 from .edge_profiles import EdgeProfileBackend
@@ -23,22 +22,6 @@ from .provisioning import DeviceProvisioningWorker, stable_name
 from .blynk_provisioner import BlynkProvisioner
 
 REPOSITORY = Path(__file__).resolve().parents[2]
-
-
-def acquire_instance_lock(path: Path):
-    """Prevent two Edge processes from sharing MQTT device tokens and stores."""
-    path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
-    if path.parent.stat().st_mode & 0o077:
-        raise PermissionError("Edge runtime directory must be private (0700).")
-    fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
-    try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode) or os.fstat(fd).st_mode & 0o077:
-            raise PermissionError("Edge lock file must be private (0600).")
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except Exception:
-        os.close(fd)
-        raise
-    return fd
 
 
 def check_edge_config(ai_directory: Path) -> None:

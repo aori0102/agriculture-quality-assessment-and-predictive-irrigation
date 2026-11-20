@@ -266,3 +266,33 @@ Without it, uplink/MQTT success can finish with "Downlink not verified".
 Validation: six mocked tests cover uplink/downlink, expired/missing commands, error
 handling, cleanup, fake value ranges and dry-run isolation. Live Cloud operation
 must be checked by running the script and observing the dashboard.
+
+## Windows and POSIX compatibility
+
+The launcher and offline tests support Windows and POSIX (Linux/macOS).
+The single-instance lock uses `msvcrt.locking` on Windows and `fcntl.flock`
+on POSIX; closing the descriptor or exiting the process releases it.
+Do not delete `runtime/edge.lock` while an Edge process is running.
+
+POSIX stores retain 0700 directory / 0600 file checks. Windows uses inherited
+filesystem ACLs instead of POSIX mode bits: keep the repository, `.env`, and
+`runtime` in a directory accessible only to the intended account. The code does
+not configure or validate Windows ACLs. Both platforms flush files and replace
+stores atomically; parent-directory fsync is performed only on POSIX.
+
+Run offline tests from `Cloud Edge` (with the project's dependencies installed):
+
+```powershell
+# Windows PowerShell
+$env:PYTHONPATH = "../AI"
+python -m unittest discover -s tests -t .
+```
+
+```bash
+# Linux / macOS
+PYTHONPATH=../AI python -m unittest discover -s tests -t .
+```
+
+POSIX permission-bit tests are skipped on Windows; lock contention, release,
+and store round trips run on both platforms. These tests do not validate live
+Blynk connections or AI model dependencies.
