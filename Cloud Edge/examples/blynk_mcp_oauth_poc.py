@@ -10,7 +10,8 @@ import time
 from urllib.parse import parse_qs, urlsplit
 import webbrowser
 
-from blynk_mcp_store import FileTokenStorage
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from cloud_edge.oauth_store import FileTokenStorage
 
 ENDPOINT = "https://blynk.cloud/mcp"
 TEMPLATE_ID = "TMPL6FGqaSpR3"

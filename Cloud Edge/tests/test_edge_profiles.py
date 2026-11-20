@@ -33,8 +33,9 @@ class EdgeProfileTests(unittest.TestCase):
         self.assertEqual(result.outcome, 'saved')
         self.assertIsNone(result.active.revision)
         self.writer.assert_called_once_with(node_id='one', plant='Illustrative Lettuce',
-            permanent_wilting_point=.1, management_allowable_depletion=.3,
-            field_capacity=.22, saturation_point=.41)
+            permanent_wilting_point=10, management_allowable_depletion=.3,
+            field_capacity=22, saturation_point=41)
+        self.assertEqual(self.log['node_profile']['one']['fc'], 22)
         restored = EdgeProfileBackend(self.writer, lambda: self.log, self.path).get_active('one')
         self.assertAlmostEqual(restored.profile.management_allowed_depletion, .3)
         self.assertEqual(restored.profile.node_description, 'Window')
@@ -42,6 +43,15 @@ class EdgeProfileTests(unittest.TestCase):
         self.assertTrue(restored.metadata_complete)
         self.assertTrue(restored.saved_only)
         self.assertNotIn('management_allowed_depletion', self.path.read_text())
+
+    def test_existing_edge_percentage_defaults_decode_without_rewrite(self):
+        self.log['node_profile']['one'].update(
+            plant='default', pwp=10.0, madp=20.0, fc=36.0, sp=50.0)
+        active = self.backend.get_active('one')
+        self.assertAlmostEqual(active.profile.permanent_wilting_point, .10)
+        self.assertAlmostEqual(active.profile.field_capacity, .36)
+        self.assertAlmostEqual(active.profile.management_allowed_depletion, 16 / 26)
+        self.writer.assert_not_called()
 
     def test_identical_update_skips_edge_write_and_nodes_are_isolated(self):
         self.backend.apply_profile(self.profile)
@@ -62,7 +72,7 @@ class EdgeProfileTests(unittest.TestCase):
             result = self.backend.apply_profile(self.profile)
         self.assertEqual(result.outcome, 'sync_failed')
         self.assertIn('Edge values saved', result.message)
-        self.assertEqual(self.log['node_profile']['one']['pwp'], .1)
+        self.assertEqual(self.log['node_profile']['one']['pwp'], 10)
         self.assertFalse(result.active.metadata_complete)
         self.assertNotIn('private-secret', result.message)
 
@@ -79,7 +89,8 @@ class EdgeProfileTests(unittest.TestCase):
 
     def test_invalid_saved_thresholds_are_not_guessed_or_converted(self):
         self.backend.apply_profile(self.profile)
-        for changes in ({'fc': .1}, {'madp': .5}, {'pwp': 10}, {'madp': True}, {'sp': float('nan')}):
+        for changes in ({'fc': .1}, {'madp': .5}, {'pwp': 101}, {'madp': True}, {'sp': float('nan')},
+                        {'pwp': .1, 'madp': .184, 'fc': .22, 'sp': .41}):
             original = copy.deepcopy(self.log)
             self.log['node_profile']['one'].update(changes)
             with self.subTest(changes=changes), self.assertRaises(ValueError):
@@ -122,8 +133,8 @@ class EdgeProfileTests(unittest.TestCase):
         from cloud_edge.datastreams import BlynkTopics
         from cloud_edge.errors import CloudError
         from tests.test_profile_sync import wait_until
-        self.write(node_id='one', plant='Initial', permanent_wilting_point=.1,
-                   management_allowable_depletion=.3, field_capacity=.22, saturation_point=.41)
+        self.write(node_id='one', plant='Initial', permanent_wilting_point=10,
+                   management_allowable_depletion=.3, field_capacity=22, saturation_point=41)
         http = Mock()
         http.read_profile_snapshot.return_value = self.profile.to_datastreams()
         sync = ProfileSync(http, self.backend, node_id='one', retry_interval=.01)
@@ -154,7 +165,7 @@ class RealEdgeContractTests(unittest.TestCase):
         repo = Path(__file__).resolve().parents[2]
         cfg = ConfigParser()
         cfg.read_dict({'nodes': {'default_node_profile': json.dumps({
-            'plant': 'Example', 'pwp': .1, 'madp': .184, 'fc': .22, 'sp': .41})}})
+            'plant': 'Example', 'pwp': 10, 'madp': 18.4, 'fc': 22, 'sp': 41})}})
         spec = importlib.util.spec_from_file_location('_isolated_operation_log', repo/'AI/operation_log_manager.py')
         manager_module = importlib.util.module_from_spec(spec)
         # Constructor reads config but does not write files; replace the store

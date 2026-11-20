@@ -101,16 +101,19 @@ class TelemetryHandler:
             return False
 
         operation_log_manager.log_node(node_id)  # Record the node ID as acquired
+        snapshot = {
+            "soil_index_pct": soil_moisture_pct,
+            "temperature_c": air_temp_c,
+            "air_humidity_pct": humidity_pct,
+        }
         if self.on_accepted is not None:
             try:
-                self.on_accepted(node_id, {
-                    "soil_index_pct": soil_moisture_pct,
-                    "temperature_c": air_temp_c,
-                    "air_humidity_pct": humidity_pct,
-                })
+                self.on_accepted(node_id, snapshot)
             except Exception:
                 # Cloud failures must not invalidate accepted Edge telemetry.
                 pass
+        else:
+            cloud_reporter.submit("send_telemetry", node_id=node_id, **snapshot)
         return True
     
 

@@ -11,6 +11,21 @@ import json
 from cloud_reporter import CloudReporter
 
 class ReporterTests(unittest.TestCase):
+    def test_late_registered_node_receives_ai_and_confirmed_status(self):
+        from cloud_edge.device_registry import RuntimeDeviceRegistry
+        registry = RuntimeDeviceRegistry()
+        r = CloudReporter(); r.configure(registry)
+        client = Mock()
+        try:
+            self.assertFalse(r.submit('send_ai_results', node_id='new', predicted_moisture_pct=40))
+            registry.add('new', client)
+            self.assertTrue(r.submit('send_ai_results', node_id='new', predicted_moisture_pct=40))
+            self.assertTrue(r.submit('report_pump_status', node_id='new', is_on=False))
+        finally:
+            r.close()
+        client.send_ai_results.assert_called_once_with(node_id='new', predicted_moisture_pct=40)
+        client.report_pump_status.assert_called_once_with(node_id='new', is_on=False)
+
     def event(self, event='pump_started', **changes):
         now = datetime.now(timezone.utc)
         data = dict(node_id='esp01', sent_at=(now-timedelta(seconds=1)).isoformat(),
@@ -126,18 +141,12 @@ class WiringTests(unittest.TestCase):
 
 class LauncherWiringTests(unittest.TestCase):
     def test_reporter_lifecycle_with_clients(self):
-        import ast
-        from contextlib import ExitStack
-        source = PROJECT_ROOT / 'Cloud Edge' / 'cloud_edge' / 'launcher.py'
-        tree=ast.parse(source.read_text(encoding='utf-8-sig'))
-        tree.body=[n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='run_with_clients']
-        ns=dict(ExitStack=ExitStack,CloudClient=Mock(),PumpDispatcher=Mock())
-        exec(compile(tree,str(source),'exec'),ns)
+        from cloud_edge.launcher import run_with_clients
         client,reporter=Mock(),Mock();events=[]
-        reporter.configure.side_effect=lambda clients: events.append(('configured',clients))
+        reporter.configure.side_effect=lambda clients: events.append(('configured',dict(clients.snapshot())))
         reporter.close.side_effect=lambda: events.append('reporter_closed')
         client.close.side_effect=lambda: events.append('client_closed')
-        ns['run_with_clients'](lambda: events.append('edge_running'),object(),
+        run_with_clients(lambda: events.append('edge_running'),object(),
             [SimpleNamespace(node_id='esp01',config=object())],
             client_factory=Mock(return_value=client),reporter=reporter)
         self.assertEqual(events,[('configured',{'esp01':client}),'edge_running','reporter_closed','client_closed'])

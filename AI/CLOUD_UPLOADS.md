@@ -6,6 +6,10 @@ Cloud Edge/ hosts CloudClient, Blynk transports and the combined launcher.
 Run the combined application in a Python environment containing both AI and Cloud
 dependencies: from `Cloud Edge/`, run `python -m run_edge`.
 The launcher registers its node-bound CloudClients with AI/cloud_reporter.py.
+The launcher shares one live registry with the reporter, provisioning worker and
+command dispatcher. Static bindings upload even when provisioning is disabled;
+approved new nodes join the registry after their Blynk binding is saved. The
+first accepted snapshot is queued after activation through the same reporter.
 Running `AI/app.py` alone receives local messages but has no registered Cloud clients,
 so no HTTP uploads occur.
 

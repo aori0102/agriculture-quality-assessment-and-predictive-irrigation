@@ -21,7 +21,8 @@ ENV_PLACEHOLDER = '# Fill in these values, then restart: python -m run_edge\n# n
 def ensure_env_file() -> bool:
     """Create the startup template exclusively; never overwrite an existing file."""
     try:
-        with ENV_FILE.open("x", encoding="utf-8") as stream:
+        fd = os.open(ENV_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
             stream.write(ENV_PLACEHOLDER)
     except FileExistsError:
         return False

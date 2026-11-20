@@ -16,12 +16,15 @@ class CloudReporter:
         self.lock = Lock()
 
     def configure(self, clients):
-        self.clients = dict(clients)
+        if self.worker is not None:
+            raise RuntimeError("CloudReporter is already configured.")
+        # RuntimeDeviceRegistry exposes get(); keep dict callers compatible.
+        self.clients = clients if hasattr(clients, "get") else dict(clients)
         self.worker = Thread(target=self._run, name="cloud-uploads", daemon=True)
         self.worker.start()
 
     def submit(self, method, *, node_id, **values):
-        if node_id not in self.clients:
+        if self.clients.get(node_id) is None:
             return False
         try:
             self.queue.put_nowait((method, node_id, values))
@@ -37,7 +40,9 @@ class CloudReporter:
                 if item is None:
                     return
                 method, node_id, values = item
-                getattr(self.clients[node_id], method)(node_id=node_id, **values)
+                client = self.clients.get(node_id)
+                if client is not None:
+                    getattr(client, method)(node_id=node_id, **values)
             except Exception as error:
                 # Do not log transport exception text, which may contain credentials.
                 print(f"Cloud upload failed: {type(error).__name__}")
@@ -71,8 +76,9 @@ class CloudReporter:
                 previous = self.last_pump_event.get(node_id)
                 if previous is not None and sent <= previous:
                     return False
+                if not self.submit("report_pump_status", node_id=node_id, is_on=states[event]):
+                    return False
                 self.last_pump_event[node_id] = sent
-                self.submit("report_pump_status", node_id=node_id, is_on=states[event])
             return True
         except (ValueError, TypeError, UnicodeDecodeError):
             return False

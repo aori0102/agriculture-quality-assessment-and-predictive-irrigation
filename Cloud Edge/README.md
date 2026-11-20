@@ -21,12 +21,15 @@ From the repository root, using the project's virtual environment:
 python -m pip install -r "Cloud Edge/requirements.txt"
 ```
 
-Create a root `.env` using `.env.example` as a reference. Set `BLYNK_SERVER` to
-the device's regional hostname (for example, `sgp1.blynk.cloud`, without a URL
-scheme or path) and `BLYNK_AUTH_TOKEN` to its device token. Existing environment
-variables override `.env` values, including an explicitly empty value, which
-fails validation. Configuration lookup does not depend on the working directory
-and does not modify the process environment.
+Create a root `.env` using `.env.example` as a reference. The combined launcher
+uses `BLYNK_DEVICES_JSON` with a regional host and referenced token variable for
+each static node. Dynamic-only mode uses `BLYNK_DEVICES_JSON='[]'`, an approved
+node list, and an operator-selected regional host; hybrid mode keeps the static
+entries while enabling dynamic provisioning. `CloudConfig.from_env()` still
+supports a standalone single client through `BLYNK_SERVER` and
+`BLYNK_AUTH_TOKEN`. Existing environment variables override `.env` values.
+Configuration lookup does not depend on the working directory and does not
+modify the process environment.
 
 Use one client for one fixed node and one Blynk device. Every upload requires
 the same `node_id`; it is checked locally, not transmitted to Blynk. The edge

@@ -6,10 +6,56 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from cloud_edge.launcher import check_edge_config, main, run_with_clients
+from cloud_edge.launcher import acquire_instance_lock, check_edge_config, main, run_with_clients
 
 
 class LauncherTests(unittest.TestCase):
+    def test_static_mode_routes_accepted_telemetry_through_reporter(self):
+        from cloud_reporter import CloudReporter
+        handler = SimpleNamespace(on_accepted=None)
+        reporter, client = CloudReporter(), Mock()
+        binding = SimpleNamespace(node_id='esp01', config=object())
+
+        def edge_main():
+            handler.on_accepted('esp01', {'soil_index_pct': 42})
+            return 'done'
+
+        result = run_with_clients(edge_main, object(), [binding],
+                                  client_factory=Mock(return_value=client),
+                                  telemetry_handler=handler, reporter=reporter)
+        self.assertEqual(result, 'done')
+        client.send_telemetry.assert_called_once_with(node_id='esp01', soil_index_pct=42)
+        self.assertIsNone(handler.on_accepted)
+
+    def test_single_instance_lock_rejects_second_holder(self):
+        import os
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / 'private' / 'edge.lock'
+            first = acquire_instance_lock(path)
+            try:
+                with self.assertRaises(BlockingIOError):
+                    acquire_instance_lock(path)
+            finally:
+                os.close(first)
+            second = acquire_instance_lock(path)
+            os.close(second)
+
+    def test_status_cli_reads_only_nonsecret_binding_data(self):
+        from cloud_edge.device_store import CreateJournal, DeviceStore, StoredDevice
+        from contextlib import redirect_stdout
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime = root / 'Cloud Edge/runtime'
+            store = DeviceStore(runtime / 'blynk_devices.json')
+            store.save({'one': StoredDevice('one', 'aiot-one', 17, 'sgp1.blynk.cloud', 'private-token')})
+            CreateJournal(runtime / 'pending_creates.json').save({'two'})
+            output = StringIO()
+            with patch('cloud_edge.launcher.REPOSITORY', root), redirect_stdout(output):
+                self.assertEqual(main(['--provisioning-status']), 0)
+            self.assertIn('device_id=17', output.getvalue())
+            self.assertIn('needs_reconciliation', output.getvalue())
+            self.assertNotIn('private-token', output.getvalue())
+
     def test_partial_startup_closes_every_constructed_client(self):
         clients = [Mock(), Mock()]
         clients[1].start.side_effect = RuntimeError('failed')
@@ -70,6 +116,7 @@ class EnvPlaceholderTests(unittest.TestCase):
             path = Path(directory) / '.env'
             with patch('cloud_edge.config.ENV_FILE', path):
                 self.assertTrue(ensure_env_file())
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
                 values = dotenv_values(path)
                 entries = json.loads(values['BLYNK_DEVICES_JSON'])
                 self.assertTrue(entries)

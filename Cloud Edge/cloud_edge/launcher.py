@@ -3,24 +3,42 @@
 import argparse
 from configparser import ConfigParser
 from contextlib import ExitStack
+import fcntl
 import importlib
 import json
 import os
 from pathlib import Path
+import stat
 import sys
 from threading import RLock
 from dotenv import dotenv_values
 
 from .client import CloudClient
-from .config import CloudConfig, load_device_bindings
+from .config import CloudConfig, ENV_FILE, ensure_env_file, load_device_bindings
 from .edge_profiles import EdgeProfileBackend
 from .edge_pump import EdgePumpBackend, PumpDispatcher
 from .device_registry import RuntimeDeviceRegistry
-from .device_store import DeviceStore
+from .device_store import CreateJournal, DeviceStore
 from .provisioning import DeviceProvisioningWorker, stable_name
 from .blynk_provisioner import BlynkProvisioner
 
 REPOSITORY = Path(__file__).resolve().parents[2]
+
+
+def acquire_instance_lock(path: Path):
+    """Prevent two Edge processes from sharing MQTT device tokens and stores."""
+    path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+    if path.parent.stat().st_mode & 0o077:
+        raise PermissionError("Edge runtime directory must be private (0700).")
+    fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode) or os.fstat(fd).st_mode & 0o077:
+            raise PermissionError("Edge lock file must be private (0600).")
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except Exception:
+        os.close(fd)
+        raise
+    return fd
 
 
 def check_edge_config(ai_directory: Path) -> None:
@@ -57,9 +75,14 @@ def run_with_clients(
     dispatcher_factory=PumpDispatcher,
     provisioning=None,
     telemetry_handler=None,
+    reporter=None,
+    instance_lock=None,
 ):
     """One shared adapter across all devices; close even after partial startup."""
     with ExitStack() as resources:
+        if instance_lock is not None:
+            lock_fd = acquire_instance_lock(instance_lock)
+            resources.callback(os.close, lock_fd)
         clients = RuntimeDeviceRegistry()
         resources.callback(clients.close)
         for binding in bindings:
@@ -98,6 +121,10 @@ def run_with_clients(
                 except Exception:
                     client.close()
                     raise
+        if reporter is not None:
+            reporter.configure(clients)
+            resources.callback(reporter.close)
+        if provisioning is not None:
             worker = DeviceProvisioningWorker(
                 edge_id=provisioning["edge_id"],
                 approved=provisioning["approved"],
@@ -107,12 +134,20 @@ def run_with_clients(
                 provisioner=BlynkProvisioner(provisioning["oauth_store"]),
                 client_factory=client_factory,
                 profile_backend=backend,
+                on_ready=(lambda node_id, snapshot: reporter.submit(
+                    "send_telemetry", node_id=node_id, **snapshot)) if reporter is not None else None,
             )
             resources.callback(worker.close)  # Stop before closing clients.
             worker.start()
-            if telemetry_handler is not None:
-                telemetry_handler.on_accepted = worker.observe_node
-                resources.callback(setattr, telemetry_handler, "on_accepted", None)
+        if telemetry_handler is not None:
+            def accepted(node_id, snapshot):
+                if clients.get(node_id) is not None:
+                    if reporter is not None:
+                        reporter.submit("send_telemetry", node_id=node_id, **snapshot)
+                elif worker is not None:
+                    worker.observe_node(node_id, snapshot)
+            telemetry_handler.on_accepted = accepted
+            resources.callback(setattr, telemetry_handler, "on_accepted", None)
         if pump_backend is not None:
             dispatcher = dispatcher_factory(clients, pump_backend)
             resources.callback(dispatcher.close)  # Stop before closing clients.
@@ -129,7 +164,26 @@ def main(argv=None) -> int:
         action="store_true",
         help="Validate configuration only; no AI imports or connections",
     )
+    parser.add_argument(
+        "--provisioning-status", action="store_true",
+        help="Show stored device IDs and pending reconciliation without credentials or network",
+    )
     args = parser.parse_args(argv)
+    if args.provisioning_status:
+        runtime = REPOSITORY / "Cloud Edge/runtime"
+        try:
+            devices = DeviceStore(runtime / "blynk_devices.json").load()
+            pending = CreateJournal(runtime / "pending_creates.json").load()
+        except Exception:
+            print("Private provisioning state is unavailable or invalid.", file=sys.stderr)
+            return 2
+        for node_id, record in sorted(devices.items()):
+            print(f"node={node_id} device_id={record.device_id} state=stored next=verify_runtime_connection")
+        for node_id in sorted(pending - devices.keys()):
+            print(f"node={node_id} state=needs_reconciliation next=inspect_Blynk_and_private_binding")
+        if not devices and not pending:
+            print("No stored or pending dynamic Blynk devices.")
+        return 0
     ai_directory = REPOSITORY / "AI"
     try:
         if ensure_env_file():
@@ -189,6 +243,7 @@ def main(argv=None) -> int:
     try:
         proxy = importlib.import_module("feranmut_proxy")
         app = importlib.import_module("app")
+        reporter = importlib.import_module("cloud_reporter").cloud_reporter
     except Exception:
         print(
             "AI initialization failed; verify AI configuration, dependencies, and model files.",
@@ -218,6 +273,8 @@ def main(argv=None) -> int:
             pump_backend=pump_backend,
             provisioning=provisioning,
             telemetry_handler=handler,
+            reporter=reporter,
+            instance_lock=REPOSITORY / "Cloud Edge/runtime/edge.lock",
         )
     except KeyboardInterrupt:
         return 0

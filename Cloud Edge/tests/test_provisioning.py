@@ -8,6 +8,7 @@ from cloud_edge.blynk_provisioner import AuthorizationRequired, BlynkProvisioner
 from cloud_edge.device_registry import RuntimeDeviceRegistry
 from cloud_edge.device_store import DeviceStore
 from cloud_edge.provisioning import DeviceProvisioningWorker, stable_name
+from cloud_reporter import CloudReporter
 
 
 class ProvisioningTests(TestCase):
@@ -31,18 +32,19 @@ class ProvisioningTests(TestCase):
         self.worker = DeviceProvisioningWorker(
             edge_id="edge-1", approved={"esp01"}, server="sgp1.blynk.cloud",
             store=self.store, registry=self.registry, provisioner=self.provisioner,
-            client_factory=factory, profile_backend=None,
+            client_factory=factory, profile_backend=None, on_ready=Mock(),
         )
 
     def test_first_observation_creates_once_then_uses_binding(self):
         self.worker._process("esp01", {"soil_index_pct": 30})
-        self.assertEqual(self.worker.status["esp01"], "ready")
+        self.assertEqual(self.worker.status["esp01"], "active_local")
         self.assertEqual(len(self.store.load()), 1)
         self.assertIsNotNone(self.registry.get("esp01"))
-        self.clients[0].send_snapshot.assert_not_called()
+        self.worker.on_ready.assert_called_once_with("esp01", {"soil_index_pct": 30})
         self.worker._process("esp01", {"soil_index_pct": 31})
         self.provisioner.create_device.assert_called_once()
-        self.clients[0].send_snapshot.assert_called_once_with(node_id="esp01", soil_index_pct=31)
+        self.assertEqual(self.worker.on_ready.call_count, 2)
+        self.clients[0].send_snapshot.assert_not_called()
 
     def test_restart_restores_without_remote_creation(self):
         self.worker._process("esp01", None)
@@ -51,7 +53,8 @@ class ProvisioningTests(TestCase):
         self.worker._process("esp01", {"temperature_c": 28})
         self.provisioner.create_device.assert_called_once()
         self.assertEqual(len(self.clients), 2)
-        self.clients[1].send_snapshot.assert_called_once()
+        self.worker.on_ready.assert_called_with("esp01", {"temperature_c": 28})
+        self.clients[1].send_snapshot.assert_not_called()
 
     def test_existing_remote_or_uncertain_create_requires_reconciliation(self):
         name = stable_name("edge-1", "esp01")
@@ -103,6 +106,19 @@ class ProvisioningTests(TestCase):
         with self.assertRaises(AuthorizationRequired):
             self.worker._process("esp01", None)
         self.assertEqual(self.store.load(), {})
+        self.assertEqual(self.worker.journal.load(), set())
+
+    def test_uncertain_create_is_quarantined_across_restart(self):
+        self.provisioner.create_device.side_effect = ProvisioningError('timeout')
+        self.worker._process('esp01', None)
+        self.assertIn('esp01', self.worker.journal.load())
+        second = DeviceProvisioningWorker(
+            edge_id='edge-1', approved={'esp01'}, server='sgp1.blynk.cloud',
+            store=self.store, registry=RuntimeDeviceRegistry(),
+            provisioner=self.provisioner, client_factory=Mock(), profile_backend=None)
+        second._process('esp01', None)
+        self.assertEqual(second.status['esp01'], 'needs_reconciliation')
+        self.provisioner.create_device.assert_called_once()
 
     def test_background_observation_activates_one_client(self):
         self.worker.start()
@@ -117,4 +133,17 @@ class ProvisioningTests(TestCase):
         finally:
             self.worker.close()
             self.registry.close()
+
+    def test_first_dynamic_snapshot_uses_shared_reporter(self):
+        reporter = CloudReporter()
+        reporter.configure(self.registry)
+        self.worker.on_ready = lambda node_id, snapshot: reporter.submit(
+            'send_telemetry', node_id=node_id, **snapshot)
+        try:
+            self.worker._process('esp01', {'soil_index_pct': 42})
+        finally:
+            reporter.close()
+        self.clients[0].send_telemetry.assert_called_once_with(
+            node_id='esp01', soil_index_pct=42)
+        self.clients[0].send_snapshot.assert_not_called()
 

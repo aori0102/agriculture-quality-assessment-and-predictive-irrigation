@@ -22,10 +22,10 @@ Blynk. The normal launcher imports AI, constructs one shared adapter for all
 node clients, starts Blynk workers, and calls the existing `app.main()` in the
 same process. All clients close on exit or partial startup failure.
 
-The currently checked-in AI configuration lacks `[nodes] default_node_profile`,
-which the existing operation manager requires. The launcher reports this
-explicitly. The AI owner must supply that configuration; Cloud Edge does not
-invent defaults or change AI files. AI model/dependency initialization must also
+The checked-in AI configuration includes `[nodes] default_node_profile` with
+percentage thresholds. The Cloud adapter converts these at its Blynk boundary.
+The launcher reports a missing or invalid profile configuration explicitly.
+AI model/dependency initialization must also
 succeed before clients start. Running the normal launcher executes the existing
 AI application and its normal behavior; it is not a hardware dry run.
 
@@ -77,8 +77,11 @@ The adapter sends a complete validated snapshot through these existing arguments
 | FC | `field_capacity` |
 | SP | `saturation_point` |
 
-Values remain fractions. Edge uses MAD to calculate and persist **MADP**, not a
-separate MAD field. Cloud Edge reconstructs MAD from persisted values:
+V10–V13 remain fractions (0–1) in Blynk. The Cloud adapter converts PWP, FC,
+and SP to percentages (0–100) when writing Edge profiles, and converts stored
+Edge percentages back to fractions for Blynk. MAD remains a fraction; Edge uses
+it to calculate and persist **MADP** in percentage points. Cloud Edge
+reconstructs MAD from persisted values:
 
 ```text
 MADP = FC - MAD * (FC - PWP)
@@ -90,8 +93,9 @@ MAD = (FC - MADP) / (FC - PWP)
 Readback validates finite numeric values, identity, and ordering before dividing.
 Strings, booleans, missing thresholds, invalid legacy records, and ambiguous
 units are rejected. Numeric comparisons use relative tolerance `1e-9` and
-absolute tolerance `1e-12`; names and identities must match exactly. No percent
-conversion or VWC calibration is inferred.
+absolute tolerance `1e-12`; names and identities must match exactly. Legacy
+saved profiles with all thresholds at or below 1 are rejected as ambiguous.
+No VWC calibration is inferred.
 
 Before writing, unknown nodes are rejected without registration. An identical
 saved core profile skips the AI write; metadata can still be updated. After

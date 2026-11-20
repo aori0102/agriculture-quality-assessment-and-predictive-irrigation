@@ -25,8 +25,10 @@ def _matches(left: dict, right: dict) -> bool:
 
 def _core(profile: PlantProfile) -> dict:
     return dict(node_id=profile.node_id, plant=profile.plant_name,
-                pwp=profile.permanent_wilting_point, madp=profile.madp,
-                fc=profile.field_capacity, sp=profile.saturation_point)
+                pwp=profile.permanent_wilting_point * 100,
+                madp=profile.madp * 100,
+                fc=profile.field_capacity * 100,
+                sp=profile.saturation_point * 100)
 
 
 class EdgeProfileBackend:
@@ -56,13 +58,15 @@ class EdgeProfileBackend:
 
     def _decode(self, node_id: str, record: dict) -> PlantProfile:
         for key in NUMERIC_KEYS:
-            if type(record.get(key)) not in (int, float) or not 0 <= record[key] <= 1:
-                raise ValueError('Saved Edge thresholds must be finite fractions; units cannot be inferred.')
+            if type(record.get(key)) not in (int, float) or not math.isfinite(record[key]) or not 0 <= record[key] <= 100:
+                raise ValueError('Saved Edge thresholds must be finite percentages from 0 to 100.')
         pwp, madp, fc, sp = (record[key] for key in NUMERIC_KEYS)
-        if not 0 <= pwp < madp < fc < sp <= 1:
+        if sp <= 1:
+            raise ValueError('Saved Edge thresholds have ambiguous legacy fraction units.')
+        if not 0 <= pwp < madp < fc < sp <= 100:
             raise ValueError('Saved Edge thresholds have invalid ordering.')
         mad = (fc - madp) / (fc - pwp)
-        return PlantProfile(node_id, '', record.get('plant'), pwp, mad, fc, sp)
+        return PlantProfile(node_id, '', record.get('plant'), pwp / 100, mad, fc / 100, sp / 100)
 
     def _load_metadata(self) -> dict:
         try:
@@ -125,9 +129,9 @@ class EdgeProfileBackend:
                 if not _matches(before, _core(profile)):
                     self._update(
                         node_id=profile.node_id, plant=profile.plant_name,
-                        permanent_wilting_point=profile.permanent_wilting_point,
+                        permanent_wilting_point=profile.permanent_wilting_point * 100,
                         management_allowable_depletion=profile.management_allowed_depletion,
-                        field_capacity=profile.field_capacity, saturation_point=profile.saturation_point,
+                        field_capacity=profile.field_capacity * 100, saturation_point=profile.saturation_point * 100,
                     )
                 record = self._record(profile.node_id)
                 if record is None:

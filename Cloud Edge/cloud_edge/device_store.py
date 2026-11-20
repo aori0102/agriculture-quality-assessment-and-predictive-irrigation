@@ -73,3 +73,44 @@ class DeviceStore:
         finally:
             if os.path.exists(name):
                 os.unlink(name)
+
+
+class CreateJournal:
+    """Durable create intent; uncertain outcomes require operator reconciliation."""
+
+    def __init__(self, path: Path):
+        self.path = path
+
+    def load(self) -> set[str]:
+        if self.path.is_symlink():
+            raise PermissionError("Create journal must not be a symlink.")
+        if not self.path.exists():
+            return set()
+        if not stat.S_ISREG(self.path.lstat().st_mode) or self.path.lstat().st_mode & 0o077:
+            raise PermissionError("Create journal must be private (0600).")
+        data = json.loads(self.path.read_text(encoding="utf-8"))
+        if not isinstance(data, list) or any(not isinstance(node, str) for node in data):
+            raise ValueError("Invalid create journal.")
+        return set(data)
+
+    def save(self, nodes: set[str]) -> None:
+        self.path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+        if self.path.parent.stat().st_mode & 0o077:
+            raise PermissionError("Create journal directory must be private (0700).")
+        self.load()
+        fd, name = tempfile.mkstemp(prefix=".create-", dir=self.path.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                os.fchmod(stream.fileno(), 0o600)
+                json.dump(sorted(nodes), stream)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(name, self.path)
+            directory = os.open(self.path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        finally:
+            if os.path.exists(name):
+                os.unlink(name)

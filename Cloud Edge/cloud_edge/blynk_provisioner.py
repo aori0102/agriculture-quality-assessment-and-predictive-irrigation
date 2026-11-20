@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 import time
 
-from examples.blynk_mcp_store import FileTokenStorage
+from .oauth_store import FileTokenStorage
 
 ENDPOINT = "https://blynk.cloud/mcp"
 TEMPLATE_ID = "TMPL6FGqaSpR3"

@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from examples.blynk_mcp_store import FileTokenStorage
+from cloud_edge.oauth_store import FileTokenStorage
 
 
 class FakeModel:
