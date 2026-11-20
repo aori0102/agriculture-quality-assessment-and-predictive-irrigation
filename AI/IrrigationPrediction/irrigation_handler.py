@@ -30,6 +30,11 @@ class IrrigationHandler:
         self.sample_delay_seconds = cfg.getfloat("irrigation_sampling", "sample_delay_seconds", fallback=1.0)
 
         self.irrigation_sampling_duration = json.loads(cfg.get("irrigation", "irrigation_sampling", fallback="[0.1, 0.5, 1.0, 2.0, 5.0, 8.0]"))
+        self.max_duration_ms = min(cfg.getint("pump", "max_duration_ms"), 60_000)
+        self.irrigation_sampling_duration = sorted({float(d) for d in self.irrigation_sampling_duration
+            if 0 < float(d) <= self.max_duration_ms / 60_000})
+        if not self.irrigation_sampling_duration:
+            raise ValueError("No irrigation duration fits the node limit (60 seconds).")
         self.max_irrigation_duration = self.irrigation_sampling_duration[-1]
         self.irrigation_sampling_duration = self.irrigation_sampling_duration[:-1]
                 
@@ -153,6 +158,10 @@ class IrrigationHandler:
         if node_id is None:
             return False
         
+        profile = operation_log_manager.get_node_profile(node_id)
+        if profile is None or profile.auto_irrigation_enabled is not True:
+            return False
+
         target_sample_time = self.current_sample_slot
         if target_sample_time is None or target_sample_time != TimeHelper.get_current_slot():
             return False
@@ -211,10 +220,11 @@ class IrrigationHandler:
         # Inference may finish after the window has changed; do not send a stale decision.
         if TimeHelper.get_current_slot() != target_sample_time:
             return False
-        if not telemetry_handler.record_irrigation_data(target_duration, node_id=node_id, timestamp=target_sample_time):
-            return False
-        self.send_irrigation_command(node_id, irrigation_minutes=target_duration)
-        return True
+        with operation_log_manager.lock:
+            if not self.send_irrigation_command(node_id, irrigation_minutes=target_duration):
+                return False
+            return telemetry_handler.record_irrigation_data(
+                target_duration, node_id=node_id, timestamp=target_sample_time)
     
     
     def configure_command_publisher(self, client: mqtt.Client, config: ConfigParser) -> None:
@@ -222,11 +232,11 @@ class IrrigationHandler:
         self.command_topic = config['mqtt']['command_topic']
         self.command_qos = config.getint('mqtt', 'command_qos')
         self.command_retain = config.getboolean('mqtt', 'command_retain')
-        self.max_duration_ms = config.getint('pump', 'max_duration_ms')
+        self.max_duration_ms = min(config.getint('pump', 'max_duration_ms'), 60_000)
         self.mqtt_client = client
 
 
-    def send_irrigation_command(self, node_id: str, irrigation_minutes: int) -> None:
+    def send_irrigation_command(self, node_id: str, irrigation_minutes: int) -> bool:
         """
         Send an irrigation command to the specified node via MQTT. The command will instruct
         the node to start the pump for the specified duration in minutes.
@@ -235,16 +245,19 @@ class IrrigationHandler:
             node_id (str): The ID of the node to which the command will be sent.
             irrigation_minutes (int): The duration for which the pump should run, in minutes.
         """
+        profile = operation_log_manager.get_node_profile(node_id)
+        if profile is None or profile.auto_irrigation_enabled is not True:
+            return False
         if irrigation_minutes <= 0:
             print(f"Invalid irrigation duration: {irrigation_minutes} minutes. Command not sent.")
-            return
+            return False
 
         duration_ms = int(irrigation_minutes * 60 * 1000)
         if duration_ms > self.max_duration_ms:
             print(f"Requested irrigation duration {duration_ms} ms exceeds maximum allowed {self.max_duration_ms} ms. Command not sent.")
-            return
+            return False
 
-        command_proxy.send_command(
+        return command_proxy.send_command(
             node_id=node_id,
             action=ActionIndex.StartPump,
             ttl_ms=300_000,

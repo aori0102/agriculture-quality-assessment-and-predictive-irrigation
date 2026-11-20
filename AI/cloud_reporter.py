@@ -13,6 +13,7 @@ class CloudReporter:
         self.queue = Queue(maxsize=256)
         self.worker = None
         self.last_pump_event = {}
+        self.last_capture_event = {}
         self.lock = Lock()
 
     def configure(self, clients):
@@ -65,13 +66,23 @@ class CloudReporter:
                 return False
             states = {"pump_started": True, "pump_stopped": False}
             event = data.get("event")
-            if not isinstance(event, str) or event not in states:
+            if not isinstance(event, str) or event not in {*states, "capture_succeeded"}:
                 return False
             sent = TimeHelper.process_time(data.get("sent_at"), require_timezone=True)
             until = TimeHelper.process_time(data.get("valid_until"), require_timezone=True)
             now = now or datetime.now(timezone.utc)
             if sent is None or until is None or not sent <= now < until:
                 return False
+            if event == "capture_succeeded":
+                sequence = data.get("sample_seq")
+                if type(sequence) is not int or not 0 <= sequence <= 0xffffffff:
+                    return False
+                with self.lock:
+                    previous = self.last_capture_event.get(node_id)
+                    if previous is not None and sent <= previous["sent_at"]:
+                        return False
+                    self.last_capture_event[node_id] = {"sent_at": sent, "sample_seq": sequence}
+                return True
             with self.lock:
                 previous = self.last_pump_event.get(node_id)
                 if previous is not None and sent <= previous:

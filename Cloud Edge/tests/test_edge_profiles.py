@@ -202,5 +202,5 @@ class RealEdgeContractTests(unittest.TestCase):
             for requested in (True, False):
                 client.pending = PumpCommand._received('one', requested, 5)
                 self.assertEqual(pump_backend.try_dispatch(client, 'one').outcome, 'saved')
-                self.assertIs(restarted.load_log()['node_profile']['one']['irrigation_status'], requested)
+                self.assertIs(restarted.load_log()['node_profile']['one']['auto_irrigation_enabled'], requested)
                 self.assertEqual(restarted.load_log()['node_profile']['one']['plant'], profile.plant_name)

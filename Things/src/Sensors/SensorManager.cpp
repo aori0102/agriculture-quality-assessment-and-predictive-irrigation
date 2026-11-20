@@ -12,8 +12,6 @@ SensorManager::SensorManager(
 }
 
 void SensorManager::begin() {
-    Wire.begin(21, 22);
-
     m_soilSensor.begin();
     m_dhtSensor.begin();
 

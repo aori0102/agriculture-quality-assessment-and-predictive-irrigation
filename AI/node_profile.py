@@ -11,3 +11,4 @@ class NodeProfile:
     madp: float
     fc: float
     sp: float
+    auto_irrigation_enabled: bool = False

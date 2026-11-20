@@ -11,6 +11,7 @@
 
 // Empty password means the configuration AP is open.
 constexpr char AP_PASSWORD[] = "";
+constexpr uint16_t ConfigPortal::DNS_PORT;
 
 // =====================================================
 // HTML ESCAPE
