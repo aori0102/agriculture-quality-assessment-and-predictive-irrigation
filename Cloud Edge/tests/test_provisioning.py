@@ -30,7 +30,7 @@ class ProvisioningTests(TestCase):
             return client
 
         self.worker = DeviceProvisioningWorker(
-            edge_id="edge-1", approved={"esp01"}, server="sgp1.blynk.cloud",
+            edge_id="edge-1", server="sgp1.blynk.cloud",
             store=self.store, registry=self.registry, provisioner=self.provisioner,
             client_factory=factory, profile_backend=None, on_ready=Mock(),
         )
@@ -68,12 +68,32 @@ class ProvisioningTests(TestCase):
         self.assertEqual(self.worker.status["esp01"], "needs_reconciliation")
         self.assertEqual(self.store.load(), {})
 
-    def test_unapproved_or_duplicate_observation_never_queues_twice(self):
-        self.assertFalse(self.worker.observe_node("stranger"))
-        self.assertEqual(self.worker.status["stranger"], "unapproved")
-        self.assertTrue(self.worker.observe_node("esp01"))
-        self.assertFalse(self.worker.observe_node("esp01"))
+    def test_unlisted_node_enqueues_without_approval_and_deduplicates(self):
+        self.assertTrue(self.worker.observe_node("esp_new_a"))
+        self.assertFalse(self.worker.observe_node("esp_new_a"))
         self.assertEqual(self.worker._queue.qsize(), 1)
+        self.worker._process("esp_new_a", None)
+        self.assertIsNotNone(self.registry.get("esp_new_a"))
+
+    def test_invalid_node_id_never_enqueues(self):
+        self.assertFalse(self.worker.observe_node("bad/node"))
+        self.assertEqual(self.worker.status["bad/node"], "invalid_node_id")
+        self.assertEqual(self.worker._queue.qsize(), 0)
+
+    def test_burst_of_distinct_nodes_is_not_dropped_by_queue_capacity(self):
+        nodes = [f"esp_{index}" for index in range(140)]
+        self.assertTrue(all(self.worker.observe_node(node) for node in nodes))
+        self.assertEqual(self.worker._queue.qsize(), len(nodes))
+        processed = []
+        self.worker._process = lambda node_id, snapshot: processed.append(node_id)
+        self.worker.start()
+        try:
+            deadline = monotonic() + 2
+            while len(processed) < len(nodes) and monotonic() < deadline:
+                sleep(.01)
+            self.assertEqual(processed, nodes)
+        finally:
+            self.worker.close()
 
     def test_search_requires_complete_pagination(self):
         provisioner = BlynkProvisioner(Path("unused"))
@@ -84,8 +104,7 @@ class ProvisioningTests(TestCase):
         self.assertEqual(provisioner.find_device("target")["id"], 9)
         self.assertEqual(provisioner.call.call_count, 2)
 
-    def test_two_approved_nodes_get_distinct_bindings(self):
-        self.worker.approved = frozenset({"esp01", "esp02"})
+    def test_two_unlisted_nodes_get_distinct_bindings(self):
         next_id = iter((42, 43))
 
         def create(name):
@@ -113,7 +132,7 @@ class ProvisioningTests(TestCase):
         self.worker._process('esp01', None)
         self.assertIn('esp01', self.worker.journal.load())
         second = DeviceProvisioningWorker(
-            edge_id='edge-1', approved={'esp01'}, server='sgp1.blynk.cloud',
+            edge_id='edge-1', server='sgp1.blynk.cloud',
             store=self.store, registry=RuntimeDeviceRegistry(),
             provisioner=self.provisioner, client_factory=Mock(), profile_backend=None)
         second._process('esp01', None)

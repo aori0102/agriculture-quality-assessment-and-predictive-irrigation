@@ -127,7 +127,6 @@ def run_with_clients(
         if provisioning is not None:
             worker = DeviceProvisioningWorker(
                 edge_id=provisioning["edge_id"],
-                approved=provisioning["approved"],
                 server=provisioning["server"],
                 store=store,
                 registry=clients,
@@ -203,20 +202,14 @@ def main(argv=None) -> int:
             cfg = ConfigParser()
             cfg.read(ai_directory / "config.cfg", encoding="utf-8-sig")
             edge_id = cfg.get("edge", "edge_id").strip()
-            approved = [
-                node.strip()
-                for node in values.get("BLYNK_APPROVED_NODES", "").split(",")
-                if node.strip()
-            ]
             server = (values.get("BLYNK_PROVISION_SERVER") or "").strip()
-            if not edge_id or not approved or not server:
+            if not edge_id or not server:
                 raise ValueError(
-                    "Dynamic provisioning requires edge_id, BLYNK_APPROVED_NODES, and BLYNK_PROVISION_SERVER."
+                    "Dynamic provisioning requires edge_id and BLYNK_PROVISION_SERVER."
                 )
             CloudConfig(server, "validation-placeholder")
             provisioning = {
                 "edge_id": edge_id,
-                "approved": approved,
                 "server": server,
                 "oauth_store": REPOSITORY / "Cloud Edge/runtime/mcp_oauth.json",
                 "device_store": REPOSITORY / "Cloud Edge/runtime/blynk_devices.json",

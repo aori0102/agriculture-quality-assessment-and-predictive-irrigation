@@ -2,6 +2,7 @@ from contextlib import redirect_stderr
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from time import monotonic, sleep
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
@@ -10,6 +11,71 @@ from cloud_edge.launcher import acquire_instance_lock, check_edge_config, main, 
 
 
 class LauncherTests(unittest.TestCase):
+    def test_hybrid_dynamic_node_joins_shared_reporter_and_dispatcher(self):
+        from cloud_reporter import CloudReporter
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            handler = SimpleNamespace(on_accepted=None)
+            reporter = CloudReporter()
+            static, dynamic = Mock(), Mock()
+            factory = Mock(side_effect=[static, dynamic])
+            provisioner = Mock()
+            provisioner.find_device.return_value = None
+            provisioner.create_device.return_value = {
+                'id': 42, 'token': 'test-dynamic-token', 'templateId': 'TMPL6FGqaSpR3',
+            }
+            pump_backend = Mock()
+            pump_backend.try_dispatch.return_value = None
+
+            def edge_main():
+                handler.on_accepted('static', {'soil_index_pct': 40})
+                handler.on_accepted('esp_new_a', {'soil_index_pct': 42})
+                deadline = monotonic() + 2
+                while dynamic.send_telemetry.call_count < 1 and monotonic() < deadline:
+                    sleep(.01)
+                dynamic.send_telemetry.assert_called_once_with(node_id='esp_new_a', soil_index_pct=42)
+                handler.on_accepted('esp_new_a', {'soil_index_pct': 43})
+                reporter.submit('send_ai_results', node_id='esp_new_a', plant_status='Healthy')
+                reporter.submit('report_pump_status', node_id='esp_new_a', is_on=False)
+                while not any(call.args[1] == 'esp_new_a' for call in pump_backend.try_dispatch.call_args_list) and monotonic() < deadline:
+                    sleep(.01)
+                self.assertTrue(any(call.args[1] == 'esp_new_a' for call in pump_backend.try_dispatch.call_args_list))
+
+            settings = {
+                'edge_id': 'edge-1', 'server': 'sgp1.blynk.cloud',
+                'device_store': root / 'private/devices.json',
+                'oauth_store': root / 'private/oauth.json',
+            }
+            with patch('cloud_edge.launcher.BlynkProvisioner', return_value=provisioner):
+                run_with_clients(edge_main, object(),
+                    [SimpleNamespace(node_id='static', config=SimpleNamespace(auth_token='test-static-token'))],
+                    client_factory=factory, pump_backend=pump_backend,
+                    telemetry_handler=handler, reporter=reporter, provisioning=settings)
+            static.send_telemetry.assert_called_once_with(node_id='static', soil_index_pct=40)
+            self.assertEqual(dynamic.send_telemetry.call_args_list, [
+                unittest.mock.call(node_id='esp_new_a', soil_index_pct=42),
+                unittest.mock.call(node_id='esp_new_a', soil_index_pct=43),
+            ])
+            dynamic.send_ai_results.assert_called_once_with(node_id='esp_new_a', plant_status='Healthy')
+            dynamic.report_pump_status.assert_called_once_with(node_id='esp_new_a', is_on=False)
+            provisioner.create_device.assert_called_once()
+            self.assertIsNone(handler.on_accepted)
+
+    def test_dynamic_only_check_needs_no_node_list(self):
+        values = {
+            'BLYNK_PROVISIONING_ENABLED': '1',
+            'BLYNK_PROVISION_SERVER': 'sgp1.blynk.cloud',
+            'BLYNK_DEVICES_JSON': '[]',
+            'BLYNK_APPROVED_NODES': 'ignored;invalid',
+        }
+        with patch('cloud_edge.launcher.ensure_env_file', return_value=False), \
+             patch('cloud_edge.launcher.check_edge_config'), \
+             patch('cloud_edge.launcher.dotenv_values', return_value=values), \
+             patch.dict('cloud_edge.launcher.os.environ', {}, clear=True), \
+             patch('cloud_edge.launcher.importlib.import_module') as imports:
+            self.assertEqual(main(['--check']), 0)
+            imports.assert_not_called()
+
     def test_static_mode_routes_accepted_telemetry_through_reporter(self):
         from cloud_reporter import CloudReporter
         handler = SimpleNamespace(on_accepted=None)

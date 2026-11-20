@@ -67,7 +67,7 @@
  const bridge=typeof BlynkBridge==='function'?new BlynkBridge({logEnabled:false,isOnErrorEnabled:true}):null;
  const LIVE=!!(bridge&&bridge.isBridgeAvailable());
  let nodeId=null,initialized=false,nodeChanged=false;
- let saved=LIVE?{}:{...DEMO},draft={...saved},cstreams=new Map(),pending=null;
+ let saved=LIVE?{}:{...DEMO},draft={...saved},streams=new Map(),pending=null;
  let editingName=false,editStartName='';
  const pushed=new Set();
  function message(text,error=false){$('#message').textContent=text;$('#message').classList.toggle('error',error)}
