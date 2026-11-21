@@ -23,7 +23,7 @@ namespace {
 
     constexpr char KEY_PUMP_PWM[] = "pump_duty";
 
-    constexpr uint8_t DEFAULT_PUMP_PWM_DUTY = 100;
+    constexpr uint8_t DEFAULT_PUMP_PWM_DUTY = 200;
 }
 
 bool DeviceConfigManager::begin() {
@@ -31,6 +31,16 @@ bool DeviceConfigManager::begin() {
 }
 
 bool DeviceConfigManager::load() {
+    // First boot must have usable defaults even if the NVS namespace is absent.
+    m_config.wifiSSID = Config::WIFI_SSID;
+    m_config.wifiPassword = Config::WIFI_PASSWORD;
+    m_config.edgeId = Config::EDGE_ID;
+    m_config.mqttHost = Config::MQTT_HOST;
+    m_config.mqttPort = Config::MQTT_PORT;
+    m_config.mqttUsername = Config::MQTT_USERNAME;
+    m_config.mqttPassword = Config::MQTT_PASSWORD;
+    m_config.telemetryIntervalMs = Config::TELEMETRY_INTERVAL_MS;
+    m_config.pumpPwmDuty = DEFAULT_PUMP_PWM_DUTY;
 
     Preferences preferences;
 
@@ -109,6 +119,9 @@ bool DeviceConfigManager::load() {
 
 
     preferences.end();
+    if (m_config.mqttHost.isEmpty()) m_config.mqttHost = Config::MQTT_HOST;
+    if (m_config.mqttPort == 0) m_config.mqttPort = Config::MQTT_PORT;
+    if (m_config.telemetryIntervalMs == 0) m_config.telemetryIntervalMs = Config::TELEMETRY_INTERVAL_MS;
 
     Serial.println("[CONFIG] Configuration loaded!");
 

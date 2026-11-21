@@ -10,7 +10,7 @@ public:
 
     static constexpr uint32_t PWM_FREQUENCY = 5000;
     static constexpr uint8_t PWM_RESOLUTION = 8;
-    static constexpr uint8_t DEFAULT_PWM_DUTY = 100;
+    static constexpr uint8_t DEFAULT_PWM_DUTY = 200;
 
     PumpController(
         uint8_t enablePin,

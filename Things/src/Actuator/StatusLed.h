@@ -6,7 +6,7 @@
 class StatusLed {
 public:
     void begin();
-    void update(bool mqttConnected);
+    void update(bool mqttConnected, bool configOpen = false);
 
 private:
     static constexpr uint8_t LED_PIN = 23;
@@ -16,6 +16,7 @@ private:
     static constexpr uint32_t PAUSE_MS = 1000;
 
     enum class ConnectionState {
+        CONFIG_OPEN,
         WIFI_DISCONNECTED,
         MQTT_DISCONNECTED,
         CONNECTED

@@ -210,7 +210,7 @@ String getVietnamTimestamp() {
 
 void handlePowerButton() {
 
-    PowerButton::Action action = powerButton.update();
+    PowerButton::Action action = powerButton.update(configPortal.isActive());
 
     switch (action) {
 
@@ -259,6 +259,12 @@ void handlePowerButton() {
 
             break;
 
+
+        case PowerButton::Action::CLOSE_CONFIG:
+            Serial.println("[POWER] Closing configuration portal...");
+            configPortal.close();
+            statusLed.update(mqttClient.isConnected(), configPortal.isActive());
+            break;
 
         case PowerButton::Action::NONE:
         default:
@@ -525,7 +531,7 @@ bool connectWiFi() {
 
         handlePowerButton();
 
-        statusLed.update(false);
+        statusLed.update(false, configPortal.isActive());
 
         pumpController.update();
 
@@ -600,7 +606,7 @@ void initializeNTP() {
 
         handlePowerButton();
 
-        statusLed.update(false);
+        statusLed.update(false, configPortal.isActive());
 
         pumpController.update();
 
@@ -807,7 +813,7 @@ void setup() {
     // 5. Apply pump PWM configuration.
     // ---------------------------------------------
 
-    pumpController.setPwmDuty(200);
+    pumpController.setPwmDuty(config.pumpPwmDuty);
 
     Serial.print("[CONFIG] Pump PWM applied: ");
     Serial.print(pumpController.getPwmDutyValue());
@@ -904,7 +910,7 @@ void loop() {
     // 3. Update connection status LED.
     // ---------------------------------------------
 
-    statusLed.update(mqttClient.isConnected());
+    statusLed.update(mqttClient.isConnected(), configPortal.isActive());
 
     // ---------------------------------------------
     // 4. Handle configuration portal.
@@ -918,7 +924,7 @@ void loop() {
 
     mqttClient.loop();
 
-    statusLed.update(mqttClient.isConnected());
+    statusLed.update(mqttClient.isConnected(), configPortal.isActive());
 
     // ---------------------------------------------
     // 6. Handle pending Edge capture command.

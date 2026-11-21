@@ -30,7 +30,7 @@ bool PowerButton::isPressed() const {
 // BUTTON UPDATE
 // =====================================================
 
-PowerButton::Action PowerButton::update() {
+PowerButton::Action PowerButton::update(bool configOpen) {
     const uint32_t now = millis();
 
     const bool reading = digitalRead(BUTTON_PIN);
@@ -79,6 +79,15 @@ PowerButton::Action PowerButton::update() {
 
             if (m_longPressTriggered) {
                 return Action::NONE;
+            }
+
+            // The release that follows the 5-second opening hold is ignored above.
+            // A new short click closes an already open portal immediately on release.
+            if (configOpen && holdDuration < HOLD_ACTION_MS) {
+                m_waitingSecondClick = false;
+                m_secondPress = false;
+                Serial.println("[POWER] Close configuration requested!");
+                return Action::CLOSE_CONFIG;
             }
 
             // Second click followed by a hold.
