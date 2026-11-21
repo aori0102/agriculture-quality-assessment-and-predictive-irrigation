@@ -232,3 +232,8 @@ yolov8x-cls.pt
 /AI/IrrigationPrediction/data_log.csv
 /Cloud Edge/runtime/
 /AI/operation_log.json
+platformio.ini
+/Things/test/
+
+# VS Code
+.vscode/
