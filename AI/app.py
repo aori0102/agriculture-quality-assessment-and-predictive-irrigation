@@ -1,3 +1,6 @@
+from edge_logging import get_logger
+logger = get_logger("EDGE")
+
 from cloud_reporter import cloud_reporter
 import json
 import paho.mqtt.client as mqtt
@@ -48,13 +51,13 @@ def on_message(client, userdata, message: mqtt.MQTTMessage):
     try:
         data = json.loads(message.payload)
     except (json.JSONDecodeError, UnicodeDecodeError) as error:
-        print(f"Invalid JSON on {message.topic}: {error}")
+        logger.warning(f"Invalid JSON on {message.topic}: {error}")
         return
 
-    print(f"Received message on topic {message.topic}: {data}")
+    logger.debug(f"Received message on topic {message.topic}: {data}")
     node_id = strip_topic_to_node_id(message.topic, "telemetry")
     if not node_id:
-        print(f"Could not extract node ID from topic {message.topic}")
+        logger.warning(f"Could not extract node ID from topic {message.topic}")
         return
     
     telemetry_handler.record_sensors_telemetry(message, node_id=node_id)
@@ -69,7 +72,7 @@ def handle_image(node_id: str, jpeg: bytes) -> None:
             on_result=lambda **values: cloud_reporter.submit("send_ai_results", **values),
         )
     except Exception as error:
-        print(f"Could not process image from {node_id}: {error}")
+        logger.error(f"Could not process image from {node_id}: {error}")
 
 
 def main():
@@ -86,7 +89,7 @@ def main():
         with cfg_path.open("w", encoding="utf-8") as file:
             cfg.write(file)
             
-    print(f"Edge UUID: {edge_id}")
+    logger.info(f"Edge UUID: {edge_id}")
 
     host = cfg["mqtt"]["host"]
     port = cfg.getint("mqtt", "port")
@@ -116,31 +119,32 @@ def main():
             return
         node_id = strip_topic_to_node_id(message.topic, "image")
         if not node_id:
-            print(f"Could not extract node ID from {message.topic}")
+            logger.warning(f"Could not extract node ID from {message.topic}")
             return
         if image_future is not None and not image_future.done():
-            print(f"Skipping image from {node_id}: image worker is busy")
+            logger.warning(f"Skipping image from {node_id}: image worker is busy")
             return
+        logger.info("IMAGE node=%s bytes=%d | queued for inference", node_id, len(message.payload))
         image_future = image_worker.submit(handle_image, node_id, bytes(message.payload))
 
     def on_event(client, userdata, message):
         if ready:
             node_id = strip_topic_to_node_id(message.topic, "events")
             if not cloud_reporter.receive_pump_event(message, node_id):
-                print(f"Ignored invalid, expired or duplicate device event on {message.topic}")
+                logger.warning(f"Ignored invalid, expired or duplicate device event on {message.topic}")
 
     def on_connect(client, userdata, flags, reason_code, properties):
         nonlocal ready, subscription_mid
         ready = False
         subscription_mid = None
         if reason_code.is_failure:
-            print(f"Connection refused: {reason_code}")
+            logger.error(f"Connection refused: {reason_code}")
             return
 
-        print(f"Connected to {host}:{port}")
+        logger.info(f"Connected to {host}:{port}")
         result, mid = client.subscribe(subscriptions)
         if result != mqtt.MQTT_ERR_SUCCESS:
-            print(f"Could not request subscriptions: {result}")
+            logger.warning(f"Could not request subscriptions: {result}")
             return
         subscription_mid = mid
 
@@ -148,6 +152,7 @@ def main():
         nonlocal ready, subscription_mid
         ready = False
         subscription_mid = None
+        logger.warning("MQTT disconnected reason=%s | waiting to reconnect", reason_code)
 
     def on_subscribe(client, userdata, mid, reason_codes, properties):
         nonlocal test_sent, ready, subscription_mid
@@ -156,11 +161,11 @@ def main():
             return
         subscription_mid = None
         if len(reason_codes) != len(subscriptions) or any(code.is_failure for code in reason_codes):
-            print(f"Subscription rejected: {reason_codes}")
+            logger.error(f"Subscription rejected: {reason_codes}")
             return
 
         ready = True
-        print(f"Edge AI ready. Subscribed to {topic_filter} and {image_filter}, {event_filter}")
+        logger.info(f"Edge AI ready. Subscribed to {topic_filter} and {image_filter}, {event_filter}")
         if not test_sent:
             result = client.publish(
                 test_topic,
@@ -170,7 +175,7 @@ def main():
             )
             test_sent = result.rc == mqtt.MQTT_ERR_SUCCESS
             if not test_sent:
-                print(f"Could not queue test message: {result.rc}")
+                logger.warning(f"Could not queue test message: {result.rc}")
 
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     client.on_connect = on_connect
@@ -182,7 +187,7 @@ def main():
     irrigation_handler.configure_command_publisher(client, cfg)
     command_proxy.configure(client, cfg)
 
-    print(f"Connecting to {host}:{port}...")
+    logger.info(f"Connecting to {host}:{port}...")
     need_connection = True
     try:
         while True:
@@ -190,11 +195,11 @@ def main():
                 try:
                     result = client.connect(host, port, keepalive=60)
                 except OSError as error:
-                    print(f"MQTT connection failed: {error}")
+                    logger.error(f"MQTT connection failed: {error}")
                     sleep(1)
                     continue
                 if result != mqtt.MQTT_ERR_SUCCESS:
-                    print(f"Could not start MQTT connection: {result}")
+                    logger.warning(f"Could not start MQTT connection: {result}")
                     sleep(1)
                     continue
                 need_connection = False
@@ -213,7 +218,7 @@ def main():
                 irrigation_handler.loop()
                 capture_handler.loop()
     except KeyboardInterrupt:
-        print("Stopping Edge AI.")
+        logger.info("Stopping Edge AI.")
     finally:
         try:
             client.disconnect()

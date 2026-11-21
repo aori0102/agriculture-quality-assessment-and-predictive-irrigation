@@ -199,6 +199,7 @@ class RealEdgeContractTests(unittest.TestCase):
             pump_backend = EdgePumpBackend(proxy.enable_irrigation_on_node,
                 proxy.disable_irrigation_on_node, manager.load_log)
             client = Client()
+            manager.log_irrigation_status('one', False)  # Explicit round-trip starting state.
             for requested in (True, False):
                 client.pending = PumpCommand._received('one', requested, 5)
                 self.assertEqual(pump_backend.try_dispatch(client, 'one').outcome, 'saved')

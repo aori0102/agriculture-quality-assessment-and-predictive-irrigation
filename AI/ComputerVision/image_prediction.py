@@ -1,3 +1,6 @@
+from edge_logging import get_logger
+logger = get_logger("VISION")
+
 from collections import Counter
 from configparser import ConfigParser
 from datetime import datetime, timezone
@@ -70,7 +73,7 @@ def process_image(node_id: str, jpeg: bytes, *, on_result=None) -> Path:
         classification = classifications.get(index)
         if classification is not None:
             label += f" - {classification['label']} {round(classification['confidence'], 2)}"
-            print(f"Image from {node_id}, box {index}: {label}")
+            logger.info(f"Image from {node_id}, box {index}: {label}")
 
         annotator.box_label(box.xyxy[0].tolist(), label, color=colors(class_id, bgr=True))
 
@@ -95,10 +98,8 @@ def process_image(node_id: str, jpeg: bytes, *, on_result=None) -> Path:
     if not encoded:
         raise OSError(f"Could not encode annotated image for {output_path}")
     output_path.write_bytes(jpeg_data.tobytes())
-    print(
-        f"Image from {node_id}: {len(boxes)} detections, "
-        f"{len(classifications)} plants classified. Saved to {output_path}"
-    )
+    logger.info(f"Image from {node_id}: {len(boxes)} detections, "
+        f"{len(classifications)} plants classified. Saved to {output_path}")
     counts = Counter(result["label"] for result in classifications.values())
     status = "; ".join(f"{label}: {count}" for label, count in sorted(counts.items()))
     if on_result is not None:

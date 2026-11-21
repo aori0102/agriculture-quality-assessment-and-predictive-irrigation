@@ -1,3 +1,6 @@
+from edge_logging import get_logger
+logger = get_logger("MODEL")
+
 from configparser import ConfigParser
 from datetime import datetime, timezone
 from math import isfinite
@@ -77,11 +80,11 @@ def prune_models(directory: Path, *protected: Path, log) -> None:
             if path.resolve() not in keep:
                 try:
                     path.unlink()
-                    print(f"Removed old irrigation model {path.name}")
+                    logger.info(f"Removed old irrigation model {path.name}")
                 except OSError as error:
-                    print(f"Could not remove old model {path.name}: {error}")
+                    logger.warning(f"Could not remove old model {path.name}: {error}")
     except (OSError, ValueError) as error:
-        print(f"Could not clean up irrigation models: {error}")
+        logger.warning(f"Could not clean up irrigation models: {error}")
 
 
 def load_or_train_initial_model(directory: Path, log):
@@ -97,19 +100,19 @@ def load_or_train_initial_model(directory: Path, log):
         try:
             candidates.append(resolve_model_path(directory, configured))
         except ValueError as error:
-            print(f"Invalid configured model path: {error}")
+            logger.warning(f"Invalid configured model path: {error}")
     candidates.extend(p for p in model_files(directory) if p not in candidates)
     for path in candidates:
         try:
             model = load_validated_model(path)
         except Exception as error:
-            print(f"Cannot load irrigation model {path.name}: {error}")
+            logger.warning(f"Cannot load irrigation model {path.name}: {error}")
             continue
         relative_path = path.relative_to(directory.resolve().parent).as_posix()
         if relative_path != log.get_model_status().get("model_path", ""):
             save_model_path(directory, path, log)
         return model
-    print("No usable model in models/. Training from base datasets; waiting...")
+    logger.info("No usable model in models/. Training from base datasets; waiting...")
 
     models = directory / "models"
     models.mkdir(exist_ok=True)
@@ -129,7 +132,7 @@ def load_or_train_initial_model(directory: Path, log):
         # A recovery model supersedes an interrupted/pending retrain from the last run.
         log.clear_model_status()
         prune_models(directory, candidate, log=log)
-        print(f"Initial irrigation model ready: {candidate.name}. Continuing Edge setup.")
+        logger.info(f"Initial irrigation model ready: {candidate.name}. Continuing Edge setup.")
         return model
     except Exception as error:
         raise RuntimeError("Cannot prepare irrigation model; Edge setup stopped") from error
@@ -185,7 +188,7 @@ class ModelRetrainer:
             "--output-dir", self.workspace.name,
             "--closed-before", TimeHelper.format_time(TimeHelper.get_slot(now)),
         )
-        print(f"Started irrigation retrain for UTC period {period}")
+        logger.info(f"Started irrigation retrain for UTC period {period}")
 
     def _poll(self) -> None:
         result = self.process.poll()
@@ -219,7 +222,7 @@ class ModelRetrainer:
         model = load_validated_model(path)
         save_model_path(self.directory, path, self.log)
         self.irrigation.model = model
-        print(f"Activated irrigation model {path.name}")
+        logger.info(f"Activated irrigation model {path.name}")
         prune_models(self.directory, path, log=self.log)
 
     def tick(self, *, can_swap: bool, now: datetime | None = None) -> bool:
@@ -230,7 +233,7 @@ class ModelRetrainer:
             try:
                 self._activate()
             except Exception as error:
-                print(f"Could not activate new irrigation model: {error}")
+                logger.warning(f"Could not activate new irrigation model: {error}")
             self.log.clear_model_status()
             self.waiting_for_swap = False
             return True
@@ -243,7 +246,7 @@ class ModelRetrainer:
             elif self.retry_interrupted or period != self.last_period:
                 self._start(period, now)
         except Exception as error:
-            print(f"Irrigation retrain failed: {error}")
+            logger.error(f"Irrigation retrain failed: {error}")
             self._cancel()
             self.log.clear_model_status()
         return False
