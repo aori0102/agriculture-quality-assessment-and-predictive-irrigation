@@ -61,3 +61,15 @@ PlatformIO build passed for `freenove_esp32_s3_camera` (Espressif32 7.1.3).
 The UART packet layout has been checked against Things' receiver. Actual sensor
 startup, image color, UART wiring and successful image reception require a
 physical test with the S3 and Things boards; no firmware is automatically flashed.
+
+## Image orientation
+
+Each captured 800x600 JPEG is decoded in PSRAM, rotated **90 degrees counterclockwise**,
+and re-encoded as a **600x800 JPEG** before the IMG0 UART packet is sent.
+Sensor JPEG quality remains 15; software encoder quality is 85/100 (a different
+scale). Temporary RGB buffers use about 2.75 MiB of PSRAM. The encoded image is
+bounded to 256 KiB. Allocation/decode/encode/size failures produce ERR0, never an
+unrotated fallback image. The rotation log includes elapsed milliseconds for
+checking the existing Things 30-second response timeout. This processing adds
+latency and JPEG recompression; actual timing and color require a board test.
+Compile-time non-square fixtures check the CCW coordinate mapping.
