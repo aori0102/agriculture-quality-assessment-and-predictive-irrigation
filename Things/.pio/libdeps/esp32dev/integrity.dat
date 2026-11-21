@@ -1,3 +1,5 @@
-bblanchon/ArduinoJson@^7.0.0
+adafruit/DHT sensor library@1.4.7
+bblanchon/ArduinoJson@7.4.3
 bertmelis/espMqttClient@1.7.3
-adafruit/DHT sensor library@^1.4.6
+adafruit/Adafruit Unified Sensor@1.1.15
+ESP32Async/AsyncTCP@3.6.1

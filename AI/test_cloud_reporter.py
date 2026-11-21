@@ -51,6 +51,19 @@ class ReporterTests(unittest.TestCase):
         r.close()
         self.assertEqual([call.kwargs['is_on'] for call in client.report_pump_status.call_args_list], [True, False])
 
+    def test_capture_success_is_separate_from_pump_status(self):
+        r = CloudReporter(); client = Mock(); r.configure({'esp01': client})
+        try:
+            msg = self.event('capture_succeeded', sample_seq=17)
+            self.assertTrue(r.receive_pump_event(msg, 'esp01'))
+            self.assertFalse(r.receive_pump_event(msg, 'esp01'))
+            self.assertEqual(r.last_capture_event['esp01']['sample_seq'], 17)
+            self.assertFalse(r.receive_pump_event(self.event('capture_succeeded'), 'esp01'))
+            self.assertFalse(r.receive_pump_event(self.event('capture_succeeded', sample_seq=True), 'esp01'))
+        finally:
+            r.close()
+        client.report_pump_status.assert_not_called()
+
     def test_invalid_events(self):
         r = CloudReporter()
         for changes in [dict(node_id='other'), dict(sent_at='bad'), dict(sent_at='2026-11-07T01:00:00'),

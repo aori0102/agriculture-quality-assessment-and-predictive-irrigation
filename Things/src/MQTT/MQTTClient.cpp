@@ -7,6 +7,7 @@
 #include <cstring>
 #include <cstdio>
 #include <ctime>
+#include <sys/time.h>
 #include <cstdint>
 
 // =====================================================
@@ -782,4 +783,30 @@ bool MQTTClient::publishImage(
     Serial.println(packetId);
 
     return true;
+}
+
+
+bool MQTTClient::publishEvent(const char* event, uint32_t sampleSeq) {
+    if (!m_client.connected()) return false;
+    struct timeval tv;
+    gettimeofday(&tv, nullptr);
+    if (tv.tv_sec < 1700000000) return false;
+    auto timestamp = [](time_t seconds, long micros) {
+        struct tm utc;
+        gmtime_r(&seconds, &utc);
+        char base[24], output[40];
+        strftime(base, sizeof(base), "%Y-%m-%dT%H:%M:%S", &utc);
+        snprintf(output, sizeof(output), "%s.%06ldZ", base, micros);
+        return String(output);
+    };
+    JsonDocument document;
+    document["node_id"] = m_clientId;
+    document["event"] = event;
+    document["sent_at"] = timestamp(tv.tv_sec, tv.tv_usec);
+    document["valid_until"] = timestamp(tv.tv_sec + 60, tv.tv_usec);
+    if (strcmp(event, "capture_succeeded") == 0) document["sample_seq"] = sampleSeq;
+    String payload;
+    serializeJson(document, payload);
+    String topic = "iot/" + m_edgeId + "/" + m_clientId + "/events";
+    return m_client.publish(topic.c_str(), 1, false, payload.c_str()) != 0;
 }

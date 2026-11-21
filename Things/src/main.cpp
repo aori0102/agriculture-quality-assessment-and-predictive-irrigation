@@ -356,6 +356,7 @@ void handleCameraResponse() {
             );
 
             if (published) {
+                mqttClient.publishEvent("capture_succeeded", image.sampleSeq);
 
                 Serial.println(
                     "[CAMERA] Image submitted to MQTT successfully!"
@@ -653,6 +654,10 @@ void initializeMQTT() {
     // 2. Pump command callback.
     // ---------------------------------------------
 
+    pumpController.setStateCallback([](bool running) {
+        mqttClient.publishEvent(running ? "pump_started" : "pump_stopped");
+    });
+
     mqttClient.setPumpCommandCallback([](uint32_t durationMs) {
 
         Serial.println();
@@ -802,13 +807,11 @@ void setup() {
     // 5. Apply pump PWM configuration.
     // ---------------------------------------------
 
-    pumpController.setPwmPercent(
-        config.pumpPwmPercent
-    );
+    pumpController.setPwmDuty(200);
 
     Serial.print("[CONFIG] Pump PWM applied: ");
-    Serial.print(pumpController.getPwmPercent());
-    Serial.println("%");
+    Serial.print(pumpController.getPwmDutyValue());
+    Serial.println("/255");
 
     // ---------------------------------------------
     // 6. Initialize configuration portal.
@@ -866,8 +869,8 @@ void setup() {
     Serial.println("========== SYSTEM READY ==========");
 
     Serial.print("[SYSTEM] Pump PWM: ");
-    Serial.print(pumpController.getPwmPercent());
-    Serial.println("%");
+    Serial.print(pumpController.getPwmDutyValue());
+    Serial.println("/255");
 
     if (!wifiConnected) {
 

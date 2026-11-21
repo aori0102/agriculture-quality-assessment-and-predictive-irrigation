@@ -8,7 +8,7 @@ calls the existing AI proxy functions:
 | ON (`1`) | `enable_irrigation_on_node(node_id=...)` |
 | OFF (`0`) | `disable_irrigation_on_node(node_id=...)` |
 
-Those functions currently save `irrigation_status` in the Edge operation log.
+Those functions save `auto_irrigation_enabled` in the Edge operation log.
 **Saved intent is not physical pump state.** This integration sends no direct
 pump actuation commands and never writes V4 (`pump_status`) or V15 (profile
 status). It adds no datastream. Existing hardware-confirmed V4 reporting remains
@@ -30,7 +30,7 @@ The launcher constructs a single shared `threading.RLock` and injects it into
 both `EdgeProfileBackend(..., operation_lock=...)` and
 `EdgePumpBackend(enable, disable, load_log, operation_lock=...)`. Use the same
 lock and one pump adapter when embedding these components manually. Independent
-AI writers do not use this lock and remain a concurrency limitation.
+AI writers use the operation log manager's own reentrant lock for atomic read/modify/write operations. The final irrigation permission check and command publish also hold that lock.
 
 `PumpDispatcher(clients_by_node_id, backend, interval=0.1)` polls all configured
 clients in one background thread. Start it after clients are constructed. Close
@@ -87,6 +87,4 @@ nodes, expiry/reconnect, lock contention, and shutdown ordering. The actual AI
 proxy's enable/disable functions are exercised against a temporary operation log.
 No live broker or hardware is used.
 
-The existing AI storage writer is non-atomic. Failed writes cannot guarantee
-rollback; Cloud Edge reports uncertainty. Physical acknowledgement, timed starts,
-stop commands, and firmware safety enforcement remain outside this integration.
+The AI storage writer uses atomic replacement. OFF prevents future automatic irrigation; it does not cancel an active run. New nodes default to OFF, while legacy Boolean flags are migrated on read. The node enforces a maximum 60-second run at raw PWM duty 100/255. Successful starts/stops and successful captures are reported on `/events`; see the README for the event contract. Physical pump flow and live delivery still require hardware testing.
