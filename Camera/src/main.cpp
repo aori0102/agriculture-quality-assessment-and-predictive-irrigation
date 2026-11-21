@@ -1,6 +1,9 @@
 
 #include <Arduino.h>
 #include "esp_camera.h"
+#include "img_converters.h"
+#include "esp_heap_caps.h"
+#include "rotate_ccw.h"
 #include <cstdlib>
 #include <cstring>
 #include <cerrno>
@@ -223,6 +226,65 @@ bool sendImage(
     return true;
 }
 
+// Software JPEG encoder quality uses 1..100 (higher is better), unlike the sensor.
+constexpr uint8_t ROTATED_JPEG_QUALITY = 85;
+struct JpegOutput {
+    uint8_t* data;
+    size_t length = 0;
+    bool overflow = false;
+};
+size_t writeRotatedJpeg(void* arg, size_t index, const void* data, size_t length) {
+    auto* output = static_cast<JpegOutput*>(arg);
+    if (index > MAX_IMAGE_SIZE || length > MAX_IMAGE_SIZE - index) {
+        output->overflow = true;
+        return 0;
+    }
+    if (length) memcpy(output->data + index, data, length);
+    output->length = index + length;
+    return length;
+}
+
+bool rotateJpegCCW(const camera_fb_t* frame, uint8_t** jpeg, size_t* length) {
+    *jpeg = nullptr;
+    *length = 0;
+    // Bound allocations to the configured capture dimensions.
+    if (frame->width != 800 || frame->height != 600) return false;
+    const size_t bytes = static_cast<size_t>(frame->width) * frame->height * 3;
+    auto* decoded = static_cast<uint8_t*>(heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    auto* rotated = static_cast<uint8_t*>(heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (!decoded || !rotated) {
+        free(decoded); free(rotated);
+        return false;
+    }
+    if (!fmt2rgb888(frame->buf, frame->len, PIXFORMAT_JPEG, decoded)) {
+        free(decoded); free(rotated);
+        return false;
+    }
+    for (size_t y = 0; y < frame->height; ++y) {
+        for (size_t x = 0; x < frame->width; ++x) {
+            memcpy(rotated + ccwIndex(x, y, frame->width, frame->height) * 3,
+                   decoded + (y * frame->width + x) * 3, 3);
+        }
+        if ((y & 15) == 0) delay(1);
+    }
+    free(decoded);
+    JpegOutput output;
+    output.data = static_cast<uint8_t*>(heap_caps_malloc(MAX_IMAGE_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (!output.data) { free(rotated); return false; }
+    const bool encoded = fmt2jpg_cb(rotated, bytes, frame->height, frame->width,
+        PIXFORMAT_RGB888, ROTATED_JPEG_QUALITY, writeRotatedJpeg, &output);
+    free(rotated);
+    if (!encoded || output.overflow || output.length < 4 ||
+        output.data[0] != 0xff || output.data[1] != 0xd8 ||
+        output.data[output.length - 2] != 0xff || output.data[output.length - 1] != 0xd9) {
+        free(output.data);
+        return false;
+    }
+    *jpeg = output.data;
+    *length = output.length;
+    return true;
+}
+
 // =====================================================
 // CAPTURE IMAGE
 // =====================================================
@@ -283,15 +345,21 @@ void captureImage(uint32_t sampleSeq) {
 
     Serial.println("[CAMERA] JPEG validation successful.");
 
-    // Keep framebuffer alive until transmission completes.
-    bool success = sendImage(
-        sampleSeq,
-        frame->buf,
-        imageSize
-    );
-
-    // Release framebuffer after transmission.
+    uint8_t* rotatedJpeg = nullptr;
+    size_t rotatedLength = 0;
+    const uint32_t rotationStart = millis();
+    const bool rotated = rotateJpegCCW(frame, &rotatedJpeg, &rotatedLength);
     esp_camera_fb_return(frame);
+    if (!rotated) {
+        Serial.println("[CAMERA] 90-degree CCW rotation/encoding failed; no image sent.");
+        sendError(sampleSeq);
+        return;
+    }
+    Serial.printf("[CAMERA] Rotated 90 CCW: 600 x 800, %u bytes, %lu ms\n",
+        static_cast<unsigned int>(rotatedLength),
+        static_cast<unsigned long>(millis() - rotationStart));
+    const bool success = sendImage(sampleSeq, rotatedJpeg, rotatedLength);
+    free(rotatedJpeg);
 
     if (success) {
         captureCount++;

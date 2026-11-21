@@ -17,7 +17,7 @@ struct DeviceConfig {
     uint32_t telemetryIntervalMs;
 
     // Pump PWM configuration: raw duty 0 - 255.
-    uint8_t pumpPwmDuty = 100;
+    uint8_t pumpPwmDuty = 200;
 };
 
 class DeviceConfigManager {
