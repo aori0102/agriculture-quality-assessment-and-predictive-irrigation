@@ -49,16 +49,33 @@ class IrrigationDataHandler:
 
     @synchronized
     def save_data(self):
+        """Persist every edit in ascending UTC timestamp, then textual node_id order.
+
+        Stable sorting keeps the relative order of duplicate node/timestamp rows.
+        Invalid timestamps fail before writing so history is never silently lost.
+        """
+        def sort_key(column):
+            if column.name == fc.TIMESTAMP:
+                parsed = column.map(TimeHelper.process_time)
+                if parsed.isna().any():
+                    raise ValueError("Cannot save irrigation log: invalid timestamp.")
+                return parsed
+            return column.astype("string")
+
+        ordered = self.data_frame.sort_values(
+            [fc.TIMESTAMP, fc.NODE_ID], ascending=True, kind="stable", key=sort_key,
+        ).reset_index(drop=True)
         # Replace atomically so an interrupted write cannot truncate the history.
         temporary = None
         try:
             with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="",
                                              dir=self.data_path.parent, delete=False) as file:
                 temporary = Path(file.name)
-                self.data_frame.to_csv(file, index=False)
+                ordered.to_csv(file, index=False)
                 file.flush()
                 os.fsync(file.fileno())
             os.replace(temporary, self.data_path)
+            self.data_frame = ordered
         finally:
             if temporary is not None and temporary.exists():
                 temporary.unlink()
