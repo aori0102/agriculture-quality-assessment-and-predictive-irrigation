@@ -7,11 +7,14 @@ void StatusLed::begin() {
     m_patternStartTime = millis();
 }
 
-void StatusLed::update(bool mqttConnected) {
+void StatusLed::update(bool mqttConnected, bool configOpen) {
     ConnectionState newState;
 
-    // Check Wi-Fi connection first.
-    if (WiFi.status() != WL_CONNECTED) {
+    // Portal indication takes priority over connection status.
+    if (configOpen) {
+        newState = ConnectionState::CONFIG_OPEN;
+    }
+    else if (WiFi.status() != WL_CONNECTED) {
         newState = ConnectionState::WIFI_DISCONNECTED;
     }
     // Check MQTT connection.
@@ -30,6 +33,10 @@ void StatusLed::update(bool mqttConnected) {
     }
 
     switch (m_currentState) {
+        case ConnectionState::CONFIG_OPEN:
+            updatePattern(3);
+            break;
+
         case ConnectionState::WIFI_DISCONNECTED:
             updatePattern(1);
             break;

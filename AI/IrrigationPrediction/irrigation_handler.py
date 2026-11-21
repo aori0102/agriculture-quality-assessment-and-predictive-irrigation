@@ -1,3 +1,6 @@
+from edge_logging import get_logger
+logger = get_logger("IRRIGATION")
+
 from cloud_reporter import cloud_reporter
 from .model_retrainer import load_or_train_initial_model
 import pandas as pd
@@ -29,6 +32,11 @@ class IrrigationHandler:
         self.sample_delay_seconds = cfg.getfloat("irrigation_sampling", "sample_delay_seconds", fallback=1.0)
 
         self.irrigation_sampling_duration = json.loads(cfg.get("irrigation", "irrigation_sampling", fallback="[0.1, 0.5, 1.0, 2.0, 5.0, 8.0]"))
+        self.max_duration_ms = min(cfg.getint("pump", "max_duration_ms"), 60_000)
+        self.irrigation_sampling_duration = sorted({float(d) for d in self.irrigation_sampling_duration
+            if 0 < float(d) <= self.max_duration_ms / 60_000})
+        if not self.irrigation_sampling_duration:
+            raise ValueError("No irrigation duration fits the node limit (60 seconds).")
         self.max_irrigation_duration = self.irrigation_sampling_duration[-1]
         self.irrigation_sampling_duration = self.irrigation_sampling_duration[:-1]
                 
@@ -129,7 +137,7 @@ class IrrigationHandler:
         sampling = self.current_unsampled_nodes.copy()
         for node_id in sampling:
             if self.handle_irrigation(node_id):
-                print(f"Node {node_id} successfully sampled!")
+                logger.info(f"Node {node_id} successfully sampled!")
                 self.current_unsampled_nodes.remove(node_id)
                 
 
@@ -147,11 +155,15 @@ class IrrigationHandler:
             bool: True if the irrigation was handled successfully, False otherwise.
         """
         
-        print(f"Handling irrigation for node: {node_id}")
+        logger.debug(f"Handling irrigation for node: {node_id}")
         
         if node_id is None:
             return False
         
+        profile = operation_log_manager.get_node_profile(node_id)
+        if profile is None or profile.auto_irrigation_enabled is not True:
+            return False
+
         target_sample_time = self.current_sample_slot
         if target_sample_time is None or target_sample_time != TimeHelper.get_current_slot():
             return False
@@ -159,7 +171,7 @@ class IrrigationHandler:
             return True
         data = irrigation_data_handler.get_irrigation_data(node_id=node_id, timestamp=target_sample_time)
         if data is None:
-            print(f"Cannot fetch irrigation data: {irrigation_data_handler.last_fetch_error}")
+            logger.debug(f"Cannot fetch irrigation data: {irrigation_data_handler.last_fetch_error}")
             return False
 
         # Unmatched timestamp
@@ -182,6 +194,8 @@ class IrrigationHandler:
             predicted_moisture_pct=float(next_moisture_without_irrigation),
         )
         plant_profile = operation_log_manager.get_node_profile(node_id)
+        logger.info("PREDICT node=%s soil=%.1f%% next_without_irrigation=%.1f%%",
+                    node_id, current_soil_moisture, float(next_moisture_without_irrigation))
 
         skip_irrigation = (
             current_soil_moisture > plant_profile.fc or
@@ -210,6 +224,11 @@ class IrrigationHandler:
         # Inference may finish after the window has changed; do not send a stale decision.
         if TimeHelper.get_current_slot() != target_sample_time:
             return False
+        with operation_log_manager.lock:
+            if not self.send_irrigation_command(node_id, irrigation_minutes=target_duration):
+                return False
+            return telemetry_handler.record_irrigation_data(
+                target_duration, node_id=node_id, timestamp=target_sample_time)
         # The device accepts one bounded run. A later sample may authorize another.
         run_duration_ms = min(int(target_duration * 60000), pump_coordinator.max_duration_ms)
         if not pump_coordinator.request_automatic_start(node_id, run_duration_ms):
@@ -225,11 +244,11 @@ class IrrigationHandler:
         self.command_topic = config['mqtt']['command_topic']
         self.command_qos = config.getint('mqtt', 'command_qos')
         self.command_retain = config.getboolean('mqtt', 'command_retain')
-        self.max_duration_ms = config.getint('pump', 'max_duration_ms')
+        self.max_duration_ms = min(config.getint('pump', 'max_duration_ms'), 60_000)
         self.mqtt_client = client
 
 
-    def send_irrigation_command(self, node_id: str, irrigation_minutes: int) -> None:
+    def send_irrigation_command(self, node_id: str, irrigation_minutes: int) -> bool:
         """
         Send an irrigation command to the specified node via MQTT. The command will instruct
         the node to start the pump for the specified duration in minutes.
@@ -238,15 +257,24 @@ class IrrigationHandler:
             node_id (str): The ID of the node to which the command will be sent.
             irrigation_minutes (int): The duration for which the pump should run, in minutes.
         """
+        profile = operation_log_manager.get_node_profile(node_id)
+        if profile is None or profile.auto_irrigation_enabled is not True:
+            return False
         if irrigation_minutes <= 0:
-            print(f"Invalid irrigation duration: {irrigation_minutes} minutes. Command not sent.")
-            return
+            logger.warning(f"Invalid irrigation duration: {irrigation_minutes} minutes. Command not sent.")
+            return False
 
         duration_ms = int(irrigation_minutes * 60 * 1000)
         if duration_ms > self.max_duration_ms:
-            print(f"Requested irrigation duration {duration_ms} ms exceeds maximum allowed {self.max_duration_ms} ms. Command not sent.")
-            return
+            logger.info(f"Requested irrigation duration {duration_ms} ms exceeds maximum allowed {self.max_duration_ms} ms. Command not sent.")
+            return False
 
+        return command_proxy.send_command(
+            node_id=node_id,
+            action=ActionIndex.StartPump,
+            ttl_ms=300_000,
+            duration_ms=duration_ms
+        )
         pump_coordinator.request_automatic_start(node_id, duration_ms)
 
 

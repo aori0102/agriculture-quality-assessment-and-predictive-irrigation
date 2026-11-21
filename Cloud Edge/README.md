@@ -274,3 +274,58 @@ Without it, uplink/MQTT success can finish with "Downlink not verified".
 Validation: six mocked tests cover uplink/downlink, expired/missing commands, error
 handling, cleanup, fake value ranges and dry-run isolation. Live Cloud operation
 must be checked by running the script and observing the dashboard.
+
+## Windows and POSIX compatibility
+
+The launcher and offline tests support Windows and POSIX (Linux/macOS).
+The single-instance lock uses `msvcrt.locking` on Windows and `fcntl.flock`
+on POSIX; closing the descriptor or exiting the process releases it.
+Do not delete `runtime/edge.lock` while an Edge process is running.
+
+POSIX stores retain 0700 directory / 0600 file checks. Windows uses inherited
+filesystem ACLs instead of POSIX mode bits: keep the repository, `.env`, and
+`runtime` in a directory accessible only to the intended account. The code does
+not configure or validate Windows ACLs. Both platforms flush files and replace
+stores atomically; parent-directory fsync is performed only on POSIX.
+
+Run offline tests from `Cloud Edge` (with the project's dependencies installed):
+
+```powershell
+# Windows PowerShell
+$env:PYTHONPATH = "../AI"
+python -m unittest discover -s tests -t .
+```
+
+```bash
+# Linux / macOS
+PYTHONPATH=../AI python -m unittest discover -s tests -t .
+```
+
+POSIX permission-bit tests are skipped on Windows; lock contention, release,
+and store round trips run on both platforms. These tests do not validate live
+Blynk connections or AI model dependencies.
+
+## Automatic irrigation permission and device events
+
+V3 controls `node_profile[node_id].auto_irrigation_enabled`, not immediate pump
+power. OFF prevents future Edge irrigation commands; an active run finishes its
+own timer. ON allows AI to decide whether irrigation is needed. New nodes default
+to OFF. Legacy `irrigation_status` is migrated and persisted on read (only Boolean true enables);
+the next flag update persists the new field and removes the legacy flag.
+Read/modify/write operations share the Edge manager's reentrant lock. Edge checks
+the flag before inference and again before publishing. Durations are capped at the
+firmware's 60-second limit; model candidates beyond that limit are excluded.
+
+Firmware sets raw 8-bit PWM duty to **100/255**, not 100 percent. Reflash Things to
+apply this change. Node events use QoS 1, retain=false on
+`iot/{edge_id}/{node_id}/events` with `node_id`, `event`, `sent_at`, `valid_until`.
+`pump_started` is emitted after the controller accepts and starts the run;
+`pump_stopped` after an active run stops. `capture_succeeded` includes `sample_seq`
+and is emitted only after a complete UART image is received and its MQTT upload
+is successfully queued. Image bytes still use `/image`. Events have a 60-second
+TTL. Edge validates timestamps, node identity, and duplicates; pump events update
+V4, while capture confirmation is stored in memory separately.
+
+These are controller/software confirmations, not flow-sensor measurements or
+confirmation that the cloud received the image. Failed/disconnected event
+publishes are not replayed. Offline tests/builds do not replace a hardware test.

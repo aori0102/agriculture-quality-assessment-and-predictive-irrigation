@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <esp_system.h>
+#include "PumpPwmValidation.h"
 
 // =====================================================
 // ACCESS POINT CONFIGURATION
@@ -11,6 +12,7 @@
 
 // Empty password means the configuration AP is open.
 constexpr char AP_PASSWORD[] = "";
+constexpr uint16_t ConfigPortal::DNS_PORT;
 
 // =====================================================
 // HTML ESCAPE
@@ -225,6 +227,10 @@ void ConfigPortal::startPortal() {
 // STOP PORTAL
 // =====================================================
 
+void ConfigPortal::close() {
+    stopPortal();
+}
+
 void ConfigPortal::stopPortal() {
 
     if (!m_isActive) {
@@ -378,6 +384,8 @@ void ConfigPortal::handleSave() {
     String mqttPassword = m_server.arg("mqttPassword");
 
     String telemetryInterval = m_server.arg("telemetryIntervalMs");
+    String pumpPwm = m_server.arg("pumpPwmDuty");
+    pumpPwm.trim();
 
     // ---------------------------------------------
     // 3. Validate required fields.
@@ -447,6 +455,11 @@ void ConfigPortal::handleSave() {
     // 6. Update configuration.
     // ---------------------------------------------
 
+    if (!validPumpPwm(pumpPwm.c_str())) {
+        m_server.send(400, "text/plain", "Pump PWM must be an integer from 0 to 255.");
+        return;
+    }
+    updatedConfig.pumpPwmDuty = static_cast<uint8_t>(pumpPwm.toInt());
     updatedConfig.wifiSSID = wifiSSID;
 
     // Empty password means keep the existing password.
@@ -880,6 +893,16 @@ String ConfigPortal::buildHtml() const {
 
     html += R"rawliteral(
                     ">
+
+                    <h3>Pump Configuration</h3>
+                    <label for="pumpPwmDuty">Pump PWM (0-255): <output id="pumpPwmValue" for="pumpPwmDuty">)rawliteral";
+    html += String(config.pumpPwmDuty);
+    html += R"rawliteral(</output></label>
+                    <input type="range" id="pumpPwmDuty" name="pumpPwmDuty"
+                           min="0" max="255" step="1" value=")rawliteral";
+    html += String(config.pumpPwmDuty);
+    html += R"rawliteral(" oninput="document.getElementById('pumpPwmValue').textContent=this.value">
+                    <p class="hint">Default: 200 / 255. 0 disables pump starts. Save to apply after restart.</p>
 
                     <button type="submit">
                         Save Configuration

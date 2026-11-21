@@ -16,8 +16,8 @@ struct DeviceConfig {
 
     uint32_t telemetryIntervalMs;
 
-    // Pump PWM configuration: 0 - 100%.
-    uint8_t pumpPwmPercent = 100;
+    // Pump PWM configuration: raw duty 0 - 255.
+    uint8_t pumpPwmDuty = 200;
 };
 
 class DeviceConfigManager {

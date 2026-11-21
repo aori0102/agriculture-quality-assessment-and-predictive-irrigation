@@ -1,3 +1,6 @@
+from edge_logging import get_logger
+logger = get_logger("CAPTURE")
+
 from time import monotonic
 from datetime import time, datetime, timezone
 from action_index import ActionIndex
@@ -30,9 +33,7 @@ class CaptureHandler:
             for entry in capture_window
         ]
         
-        print("Capture Handler initialized. The following time window will be used for sending capturing commands:")
-        for t in self.capture_window:
-            print(f"  {t}")
+        logger.info("UTC capture schedule: %s", ", ".join(t.strftime("%H:%M") for t in self.capture_window))
             
         self.previous_capture_time = monotonic()
         
@@ -54,7 +55,7 @@ class CaptureHandler:
         
         self.unsampled_times = {slot for slot in self.unsampled_times if not (slot.hour == now.hour and slot.minute == now.minute)}
 
-        print(f"Sending capture commands at {now.isoformat()}")
+        logger.info(f"Sending capture commands at {now.isoformat()}")
         
         for node_id in operation_log_manager.read_all_recorded_nodes():
             command_proxy.send_command(node_id, action=ActionIndex.Capture, ttl_ms=60000, duration_ms=1234)

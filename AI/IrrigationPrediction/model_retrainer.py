@@ -1,6 +1,8 @@
+from edge_logging import get_logger
+logger = get_logger("MODEL")
+
 from configparser import ConfigParser
 from datetime import datetime, timezone
-from io import StringIO
 from math import isfinite
 from pathlib import Path
 import subprocess
@@ -12,7 +14,6 @@ from uuid import uuid4
 import joblib
 import pandas as pd
 
-from operation_log_manager import atomic_write_text
 from time_helper import TimeHelper
 from . import field_constants as fc
 
@@ -53,29 +54,22 @@ def resolve_model_path(directory: Path, stored: str) -> Path:
     return path
 
 
-def save_model_path(directory: Path, path: Path) -> None:
+def save_model_path(directory: Path, path: Path, log) -> None:
     path = resolve_model_path(directory, str(path))
-    config_path = directory.parent / "config.cfg"
-    config = ConfigParser()
-    with config_path.open(encoding="utf-8-sig") as file:
-        config.read_file(file)
-    if not config.has_section("irrigation_model"):
-        config.add_section("irrigation_model")
-    config["irrigation_model"]["model_path"] = path.resolve().relative_to(directory.resolve().parent).as_posix()
-    text = StringIO()
-    config.write(text)
-    atomic_write_text(config_path, text.getvalue())
+    log.set_model_path(path.relative_to(directory.resolve().parent).as_posix())
 
 
-def prune_models(directory: Path, *protected: Path) -> None:
+def prune_models(directory: Path, *protected: Path, log) -> None:
     """Keep three managed models, reserving slots for active/pending models."""
     try:
-        config = ConfigParser()
-        config.read(directory.parent / "config.cfg", encoding="utf-8-sig")
-        active = config.get("irrigation_model", "model_path", fallback="")
+        status = log.get_model_status()
+        active = status.get("model_path", "")
         keep = {path.resolve() for path in protected}
         if active:
             keep.add(resolve_model_path(directory, active))
+        pending = status.get("new_model_path", "")
+        if pending:
+            keep.add(resolve_model_path(directory, pending))
         models = model_files(directory)
         keep.intersection_update(p.resolve() for p in models)
         for path in models:
@@ -86,37 +80,39 @@ def prune_models(directory: Path, *protected: Path) -> None:
             if path.resolve() not in keep:
                 try:
                     path.unlink()
-                    print(f"Removed old irrigation model {path.name}")
+                    logger.info(f"Removed old irrigation model {path.name}")
                 except OSError as error:
-                    print(f"Could not remove old model {path.name}: {error}")
+                    logger.warning(f"Could not remove old model {path.name}: {error}")
     except (OSError, ValueError) as error:
-        print(f"Could not clean up irrigation models: {error}")
+        logger.warning(f"Could not clean up irrigation models: {error}")
 
 
 def load_or_train_initial_model(directory: Path, log):
     """Block startup until a validated model is available; fail if training fails."""
-    config = ConfigParser()
-    with (directory.parent / "config.cfg").open(encoding="utf-8-sig") as file:
-        config.read_file(file)
-    configured = config.get("irrigation_model", "model_path", fallback="")
+    configured = log.get_model_status().get("model_path", "")
+    if not configured:
+        # One-way compatibility for a config from before model_path moved to the log.
+        config = ConfigParser()
+        config.read(directory.parent / "config.cfg", encoding="utf-8-sig")
+        configured = config.get("irrigation_model", "model_path", fallback="")
     candidates = []
     if configured:
         try:
             candidates.append(resolve_model_path(directory, configured))
         except ValueError as error:
-            print(f"Invalid configured model path: {error}")
+            logger.warning(f"Invalid configured model path: {error}")
     candidates.extend(p for p in model_files(directory) if p not in candidates)
     for path in candidates:
         try:
             model = load_validated_model(path)
         except Exception as error:
-            print(f"Cannot load irrigation model {path.name}: {error}")
+            logger.warning(f"Cannot load irrigation model {path.name}: {error}")
             continue
         relative_path = path.relative_to(directory.resolve().parent).as_posix()
-        if relative_path != configured:
-            save_model_path(directory, path)
+        if relative_path != log.get_model_status().get("model_path", ""):
+            save_model_path(directory, path, log)
         return model
-    print("No usable model in models/. Training from base datasets; waiting...")
+    logger.info("No usable model in models/. Training from base datasets; waiting...")
 
     models = directory / "models"
     models.mkdir(exist_ok=True)
@@ -131,12 +127,12 @@ def load_or_train_initial_model(directory: Path, log):
             cwd=directory, check=True, timeout=3600,
         )
         model = load_validated_model(candidate)
-        save_model_path(directory, candidate)
+        save_model_path(directory, candidate, log)
         committed = True
         # A recovery model supersedes an interrupted/pending retrain from the last run.
         log.clear_model_status()
-        prune_models(directory, candidate)
-        print(f"Initial irrigation model ready: {candidate.name}. Continuing Edge setup.")
+        prune_models(directory, candidate, log=log)
+        logger.info(f"Initial irrigation model ready: {candidate.name}. Continuing Edge setup.")
         return model
     except Exception as error:
         raise RuntimeError("Cannot prepare irrigation model; Edge setup stopped") from error
@@ -192,7 +188,7 @@ class ModelRetrainer:
             "--output-dir", self.workspace.name,
             "--closed-before", TimeHelper.format_time(TimeHelper.get_slot(now)),
         )
-        print(f"Started irrigation retrain for UTC period {period}")
+        logger.info(f"Started irrigation retrain for UTC period {period}")
 
     def _poll(self) -> None:
         result = self.process.poll()
@@ -217,17 +213,17 @@ class ModelRetrainer:
         self._close_workspace()
         self.log.log_model_ready(str(self.candidate.relative_to(self.directory)))
         self.waiting_for_swap = True
-        prune_models(self.directory, self.candidate)
+        prune_models(self.directory, self.candidate, log=self.log)
         self.candidate = None
 
     def _activate(self) -> None:
         status = self.log.get_model_status()
         path = resolve_model_path(self.directory, status["new_model_path"])
         model = load_validated_model(path)
-        save_model_path(self.directory, path)
+        save_model_path(self.directory, path, self.log)
         self.irrigation.model = model
-        print(f"Activated irrigation model {path.name}")
-        prune_models(self.directory, path)
+        logger.info(f"Activated irrigation model {path.name}")
+        prune_models(self.directory, path, log=self.log)
 
     def tick(self, *, can_swap: bool, now: datetime | None = None) -> bool:
         """Run once between MQTT iterations; return True if this turn is for swapping."""
@@ -237,7 +233,7 @@ class ModelRetrainer:
             try:
                 self._activate()
             except Exception as error:
-                print(f"Could not activate new irrigation model: {error}")
+                logger.warning(f"Could not activate new irrigation model: {error}")
             self.log.clear_model_status()
             self.waiting_for_swap = False
             return True
@@ -250,7 +246,7 @@ class ModelRetrainer:
             elif self.retry_interrupted or period != self.last_period:
                 self._start(period, now)
         except Exception as error:
-            print(f"Irrigation retrain failed: {error}")
+            logger.error(f"Irrigation retrain failed: {error}")
             self._cancel()
             self.log.clear_model_status()
         return False

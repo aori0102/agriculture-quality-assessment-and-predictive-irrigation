@@ -5,6 +5,7 @@ from tempfile import TemporaryDirectory
 from time import monotonic, sleep
 from types import SimpleNamespace
 import unittest
+import os
 from unittest.mock import Mock, patch
 
 from cloud_edge.launcher import acquire_instance_lock, check_edge_config, main, run_with_clients
@@ -190,7 +191,8 @@ class EnvPlaceholderTests(unittest.TestCase):
             path = Path(directory) / '.env'
             with patch('cloud_edge.config.ENV_FILE', path):
                 self.assertTrue(ensure_env_file())
-                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+                if os.name != "nt":
+                    self.assertEqual(path.stat().st_mode & 0o777, 0o600)
                 values = dotenv_values(path)
                 entries = json.loads(values['BLYNK_DEVICES_JSON'])
                 self.assertTrue(entries)

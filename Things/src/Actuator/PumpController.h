@@ -2,6 +2,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include <functional>
 
 class PumpController {
 public:
@@ -9,7 +10,7 @@ public:
 
     static constexpr uint32_t PWM_FREQUENCY = 5000;
     static constexpr uint8_t PWM_RESOLUTION = 8;
-    static constexpr uint8_t DEFAULT_PWM_PERCENT = 100;
+    static constexpr uint8_t DEFAULT_PWM_DUTY = 200;
 
     PumpController(
         uint8_t enablePin,
@@ -25,10 +26,12 @@ public:
 
     void update();
 
-    // Set pump speed from 0 to 100 percent.
-    void setPwmPercent(uint8_t percent);
+    void setStateCallback(std::function<void(bool)> callback) { m_stateCallback = callback; }
 
-    uint8_t getPwmPercent() const;
+    // Raw 8-bit PWM duty: 0..255.
+    void setPwmDuty(uint8_t duty);
+
+    uint8_t getPwmDutyValue() const;
 
     bool isRunning() const;
     bool takeStateChange();
@@ -36,11 +39,12 @@ public:
     uint32_t getRemainingTime() const;
 
 private:
+    std::function<void(bool)> m_stateCallback;
     uint8_t m_enablePin;
     uint8_t m_input1Pin;
     uint8_t m_input2Pin;
 
-    uint8_t m_pwmPercent = DEFAULT_PWM_PERCENT;
+    uint8_t m_pwmDuty = DEFAULT_PWM_DUTY;
 
     bool m_isRunning = false;
     bool m_stateChanged = false;

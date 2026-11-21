@@ -1,3 +1,6 @@
+from edge_logging import get_logger
+logger = get_logger("COMMAND")
+
 import json
 import paho.mqtt.client as mqtt
 from configparser import ConfigParser
@@ -14,7 +17,7 @@ class CommandProxy:
         self.command_topic = config["mqtt"]["command_topic"]
         self.command_qos = config.getint("mqtt", "command_qos")
         self.command_retain = config.getboolean("mqtt", "command_retain")
-        self.max_pump_duration_ms = config.getint("pump", "max_duration_ms")
+        self.max_pump_duration_ms = min(config.getint("pump", "max_duration_ms"), 60_000)
         self.mqtt_client = client
 
     def send_command(
@@ -42,7 +45,7 @@ class CommandProxy:
 
         client = self.mqtt_client
         if client is None:
-            print("Cannot send command: MQTT publisher is not configured")
+            logger.warning("Cannot send command: MQTT publisher is not configured")
             return False
 
         if action is ActionIndex.StartPump:
@@ -54,7 +57,7 @@ class CommandProxy:
                 )
 
         if not client.is_connected():
-            print("Cannot send command: MQTT is disconnected")
+            logger.warning("Cannot send command: MQTT is disconnected")
             return False
 
         topic = self.command_topic.format(edge_id=self.edge_id, node_id=node_id)
@@ -69,7 +72,7 @@ class CommandProxy:
         if command_id is not None:
             payload["command_id"] = command_id
         
-        print(f"Sending command to topic {topic}: {payload}")
+        logger.debug("TX topic=%s payload=%s", topic, payload)
 
         result = client.publish(
             topic,
@@ -78,9 +81,11 @@ class CommandProxy:
             retain=self.command_retain,
         )
         if result.rc != mqtt.MQTT_ERR_SUCCESS:
-            print(f"Could not queue command on {topic}: {mqtt.error_string(result.rc)}")
+            logger.warning(f"Could not queue command on {topic}: {mqtt.error_string(result.rc)}")
             return False
 
+        logger.info("QUEUED node=%s action=%s duration_ms=%s ttl_ms=%s",
+                    node_id, action.value, duration_ms, ttl_ms)
         return True
 
 

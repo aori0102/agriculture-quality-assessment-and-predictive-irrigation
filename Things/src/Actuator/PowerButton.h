@@ -8,11 +8,12 @@ public:
         NONE,
         RESTART,
         DEEP_SLEEP,
-        OPEN_CONFIG
+        OPEN_CONFIG,
+        CLOSE_CONFIG
     };
 
     void begin();
-    Action update();
+    Action update(bool configOpen = false);
 
     void enterDeepSleep();
 

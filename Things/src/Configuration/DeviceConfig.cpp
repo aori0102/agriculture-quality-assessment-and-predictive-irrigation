@@ -21,9 +21,9 @@ namespace {
 
     constexpr char KEY_TELEMETRY_INTERVAL[] = "tele_interval";
 
-    constexpr char KEY_PUMP_PWM[] = "pump_pwm";
+    constexpr char KEY_PUMP_PWM[] = "pump_duty";
 
-    constexpr uint8_t DEFAULT_PUMP_PWM_PERCENT = 100;
+    constexpr uint8_t DEFAULT_PUMP_PWM_DUTY = 200;
 }
 
 bool DeviceConfigManager::begin() {
@@ -31,6 +31,16 @@ bool DeviceConfigManager::begin() {
 }
 
 bool DeviceConfigManager::load() {
+    // First boot must have usable defaults even if the NVS namespace is absent.
+    m_config.wifiSSID = Config::WIFI_SSID;
+    m_config.wifiPassword = Config::WIFI_PASSWORD;
+    m_config.edgeId = Config::EDGE_ID;
+    m_config.mqttHost = Config::MQTT_HOST;
+    m_config.mqttPort = Config::MQTT_PORT;
+    m_config.mqttUsername = Config::MQTT_USERNAME;
+    m_config.mqttPassword = Config::MQTT_PASSWORD;
+    m_config.telemetryIntervalMs = Config::TELEMETRY_INTERVAL_MS;
+    m_config.pumpPwmDuty = DEFAULT_PUMP_PWM_DUTY;
 
     Preferences preferences;
 
@@ -101,28 +111,23 @@ bool DeviceConfigManager::load() {
     // 5. Pump configuration
     // ---------------------------------------------
 
-    m_config.pumpPwmPercent = preferences.getUChar(
+    m_config.pumpPwmDuty = preferences.getUChar(
         KEY_PUMP_PWM,
-        DEFAULT_PUMP_PWM_PERCENT
+        DEFAULT_PUMP_PWM_DUTY
     );
 
-    // Validate PWM configuration.
-    if (m_config.pumpPwmPercent > 100) {
 
-        Serial.println(
-            "[CONFIG] Invalid pump PWM in NVS. Using 100%."
-        );
-
-        m_config.pumpPwmPercent = DEFAULT_PUMP_PWM_PERCENT;
-    }
 
     preferences.end();
+    if (m_config.mqttHost.isEmpty()) m_config.mqttHost = Config::MQTT_HOST;
+    if (m_config.mqttPort == 0) m_config.mqttPort = Config::MQTT_PORT;
+    if (m_config.telemetryIntervalMs == 0) m_config.telemetryIntervalMs = Config::TELEMETRY_INTERVAL_MS;
 
     Serial.println("[CONFIG] Configuration loaded!");
 
     Serial.print("[CONFIG] Pump PWM: ");
-    Serial.print(m_config.pumpPwmPercent);
-    Serial.println("%");
+    Serial.print(m_config.pumpPwmDuty);
+    Serial.println("/255");
 
     return true;
 }
@@ -140,17 +145,7 @@ bool DeviceConfigManager::save(const DeviceConfig& config) {
         return false;
     }
 
-    // Validate pump PWM before saving.
-    if (config.pumpPwmPercent > 100) {
 
-        Serial.println(
-            "[CONFIG] Save rejected: invalid pump PWM."
-        );
-
-        preferences.end();
-
-        return false;
-    }
 
     // ---------------------------------------------
     // 1. WiFi configuration
@@ -214,7 +209,7 @@ bool DeviceConfigManager::save(const DeviceConfig& config) {
 
     preferences.putUChar(
         KEY_PUMP_PWM,
-        config.pumpPwmPercent
+        config.pumpPwmDuty
     );
 
     preferences.end();
@@ -225,8 +220,8 @@ bool DeviceConfigManager::save(const DeviceConfig& config) {
     Serial.println("[CONFIG] Configuration saved!");
 
     Serial.print("[CONFIG] Pump PWM saved: ");
-    Serial.print(m_config.pumpPwmPercent);
-    Serial.println("%");
+    Serial.print(m_config.pumpPwmDuty);
+    Serial.println("/255");
 
     return true;
 }

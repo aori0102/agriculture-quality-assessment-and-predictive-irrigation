@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 import stat
 import tempfile
+
+from .platform_files import has_public_permissions, make_private, sync_directory
 import time
 
 
@@ -15,10 +17,12 @@ class FileTokenStorage:
         self.client_info_type = client_info_type
 
     def _read(self):
+        if self.path.is_symlink():
+            raise PermissionError("OAuth store must not be a symlink.")
         if not self.path.exists():
             return {}
         mode = self.path.lstat().st_mode
-        if not stat.S_ISREG(mode) or mode & 0o077:
+        if not stat.S_ISREG(mode) or has_public_permissions(mode):
             raise PermissionError("OAuth store must be a private regular file (0600).")
         data = json.loads(self.path.read_text(encoding="utf-8"))
         if not isinstance(data, dict) or set(data) - {"tokens", "client_info", "stored_at"}:
@@ -27,21 +31,17 @@ class FileTokenStorage:
 
     def _write(self, data):
         self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        if self.path.parent.stat().st_mode & 0o077:
+        if has_public_permissions(self.path.parent.stat().st_mode):
             raise PermissionError("OAuth store directory must be private (0700).")
         fd, name = tempfile.mkstemp(prefix=".oauth-", dir=self.path.parent)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as stream:
-                os.fchmod(stream.fileno(), 0o600)
+                make_private(stream.fileno())
                 json.dump(data, stream)
                 stream.flush()
                 os.fsync(stream.fileno())
             os.replace(name, self.path)
-            directory = os.open(self.path.parent, os.O_RDONLY)
-            try:
-                os.fsync(directory)
-            finally:
-                os.close(directory)
+            sync_directory(self.path.parent)
         finally:
             if os.path.exists(name):
                 os.unlink(name)

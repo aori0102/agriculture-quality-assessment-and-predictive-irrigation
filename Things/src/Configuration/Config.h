@@ -22,5 +22,5 @@ namespace Config {
     constexpr char MQTT_PASSWORD[] = "";
 
     // Sampling interval
-    constexpr uint32_t TELEMETRY_INTERVAL_MS = 5000;
+    constexpr uint32_t TELEMETRY_INTERVAL_MS = 10000;
 }

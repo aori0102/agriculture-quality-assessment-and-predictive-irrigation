@@ -19,6 +19,9 @@ public:
     // Called by PowerButton when the user holds the button for 5 seconds.
     void open();
 
+    // Close the AP/portal without saving or restarting the device.
+    void close();
+
 private:
     static constexpr uint16_t DNS_PORT = 53;
     static constexpr uint16_t HTTP_PORT = 80;

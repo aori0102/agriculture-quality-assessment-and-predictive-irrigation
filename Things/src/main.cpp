@@ -210,7 +210,7 @@ String getVietnamTimestamp() {
 
 void handlePowerButton() {
 
-    PowerButton::Action action = powerButton.update();
+    PowerButton::Action action = powerButton.update(configPortal.isActive());
 
     switch (action) {
 
@@ -259,6 +259,12 @@ void handlePowerButton() {
 
             break;
 
+
+        case PowerButton::Action::CLOSE_CONFIG:
+            Serial.println("[POWER] Closing configuration portal...");
+            configPortal.close();
+            statusLed.update(mqttClient.isConnected(), configPortal.isActive());
+            break;
 
         case PowerButton::Action::NONE:
         default:
@@ -356,6 +362,7 @@ void handleCameraResponse() {
             );
 
             if (published) {
+                mqttClient.publishEvent("capture_succeeded", image.sampleSeq);
 
                 Serial.println(
                     "[CAMERA] Image submitted to MQTT successfully!"
@@ -524,7 +531,7 @@ bool connectWiFi() {
 
         handlePowerButton();
 
-        statusLed.update(false);
+        statusLed.update(false, configPortal.isActive());
 
         pumpController.update();
 
@@ -599,7 +606,7 @@ void initializeNTP() {
 
         handlePowerButton();
 
-        statusLed.update(false);
+        statusLed.update(false, configPortal.isActive());
 
         pumpController.update();
 
@@ -652,6 +659,10 @@ void initializeMQTT() {
     // ---------------------------------------------
     // 2. Pump command callback.
     // ---------------------------------------------
+
+    pumpController.setStateCallback([](bool running) {
+        mqttClient.publishEvent(running ? "pump_started" : "pump_stopped");
+    });
 
     mqttClient.setPumpCommandCallback([](uint32_t durationMs) {
 
@@ -809,13 +820,11 @@ void setup() {
     // 5. Apply pump PWM configuration.
     // ---------------------------------------------
 
-    pumpController.setPwmPercent(
-        config.pumpPwmPercent
-    );
+    pumpController.setPwmDuty(config.pumpPwmDuty);
 
     Serial.print("[CONFIG] Pump PWM applied: ");
-    Serial.print(pumpController.getPwmPercent());
-    Serial.println("%");
+    Serial.print(pumpController.getPwmDutyValue());
+    Serial.println("/255");
 
     // ---------------------------------------------
     // 6. Initialize configuration portal.
@@ -873,8 +882,8 @@ void setup() {
     Serial.println("========== SYSTEM READY ==========");
 
     Serial.print("[SYSTEM] Pump PWM: ");
-    Serial.print(pumpController.getPwmPercent());
-    Serial.println("%");
+    Serial.print(pumpController.getPwmDutyValue());
+    Serial.println("/255");
 
     if (!wifiConnected) {
 
@@ -916,7 +925,7 @@ void loop() {
     // 3. Update connection status LED.
     // ---------------------------------------------
 
-    statusLed.update(mqttClient.isConnected());
+    statusLed.update(mqttClient.isConnected(), configPortal.isActive());
 
     // ---------------------------------------------
     // 4. Handle configuration portal.
@@ -930,7 +939,7 @@ void loop() {
 
     mqttClient.loop();
 
-    statusLed.update(mqttClient.isConnected());
+    statusLed.update(mqttClient.isConnected(), configPortal.isActive());
 
     // ---------------------------------------------
     // 6. Handle pending Edge capture command.
