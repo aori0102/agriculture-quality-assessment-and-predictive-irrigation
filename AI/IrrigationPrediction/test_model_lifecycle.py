@@ -6,6 +6,8 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
+from operation_log_manager import OperationLogManager
+import json
 
 AI = Path(os.environ.get('EDGE_AI_PATH', str(Path(__file__).resolve().parents[1])))
 sys.path.insert(0, str(AI))
@@ -24,7 +26,9 @@ class LifecycleTests(unittest.TestCase):
         self.models = self.root / 'models'
         self.models.mkdir()
         (self.root.parent / 'config.cfg').write_text('[irrigation_model]\nmodel_path = IrrigationPrediction/models/irrigation_0.joblib\n[vision_model]\ndetection_path = ComputerVision/detector.pt\n')
-        self.log = Mock()
+        self.log = OperationLogManager()
+        self.log.log_file_path = self.root.parent / 'operation_log.json'
+        self.log.set_model_path('IrrigationPrediction/models/irrigation_0.joblib')
 
     def files(self):
         for i in range(6):
@@ -36,7 +40,7 @@ class LifecycleTests(unittest.TestCase):
         self.files()
         unrelated = self.models / 'notes.txt'
         unrelated.touch()
-        m.prune_models(self.root, self.models / 'irrigation_1.joblib')
+        m.prune_models(self.root, self.models / 'irrigation_1.joblib', log=self.log)
         self.assertEqual({p.name for p in self.models.glob('irrigation_*.joblib')},
                          {'irrigation_0.joblib', 'irrigation_1.joblib', 'irrigation_5.joblib'})
         self.assertTrue(unrelated.exists())
@@ -62,7 +66,38 @@ class LifecycleTests(unittest.TestCase):
         with patch.object(m, 'load_validated_model', side_effect=load), patch.object(m.subprocess, 'run') as run:
             self.assertIs(m.load_or_train_initial_model(self.root, self.log), model)
         run.assert_not_called()
-        self.assertIn('IrrigationPrediction/models/original.joblib', (self.root.parent / 'config.cfg').read_text())
+        self.assertEqual(self.log.get_model_status()['model_path'], 'IrrigationPrediction/models/original.joblib')
+
+    def test_legacy_log_without_active_path_keeps_other_fields(self):
+        data = self.log.load_log()
+        del data['model_status']['model_path']
+        data['model_status']['last_retrain_period'] = 'keep-period'
+        data['node_profile']['one'] = {'node_id': 'one', 'custom': 12}
+        self.log.log_file_path.write_text(json.dumps(data))
+        self.assertEqual(self.log.get_model_status()['model_path'], '')
+        self.log.set_model_path('IrrigationPrediction/models/selected.joblib')
+        restored = self.log.load_log()
+        self.assertEqual(restored['model_status']['last_retrain_period'], 'keep-period')
+        self.assertEqual(restored['node_profile']['one']['custom'], 12)
+        self.log.clear_model_status()
+        self.assertTrue(self.log.get_model_status()['model_path'].endswith('selected.joblib'))
+
+    def test_startup_uses_log_over_legacy_config_and_never_rewrites_config(self):
+        self.log.set_model_path('IrrigationPrediction/models/selected.joblib')
+        before = (self.root.parent / 'config.cfg').read_bytes()
+        with patch.object(m, 'load_validated_model', return_value=object()) as load:
+            m.load_or_train_initial_model(self.root, self.log)
+        self.assertEqual(load.call_args.args[0], self.models / 'selected.joblib')
+        self.assertEqual(before, (self.root.parent / 'config.cfg').read_bytes())
+
+    def test_legacy_config_migrates_after_validation(self):
+        data = self.log.load_log()
+        data['model_status']['model_path'] = ''
+        self.log.save_log(data)
+        with patch.object(m, 'load_validated_model', return_value=object()):
+            m.load_or_train_initial_model(self.root, self.log)
+        self.assertEqual(self.log.get_model_status()['model_path'],
+                         'IrrigationPrediction/models/irrigation_0.joblib')
 
     def test_legacy_paths_resolve_inside_models(self):
         self.assertEqual(m.resolve_model_path(self.root, 'retrained_models/old.joblib'),
@@ -77,7 +112,7 @@ class LifecycleTests(unittest.TestCase):
                 m.load_or_train_initial_model(self.root, self.log)
         self.assertEqual(before, (self.root.parent / 'config.cfg').read_bytes())
         self.assertEqual(list(self.models.iterdir()), [])
-        self.log.clear_model_status.assert_not_called()
+        self.assertEqual(self.log.get_model_status()['model_path'], 'IrrigationPrediction/models/irrigation_0.joblib')
 
     def test_invalid_prediction_rejected(self):
         model = Mock()
@@ -94,14 +129,15 @@ class LifecycleTests(unittest.TestCase):
         retrainer = object.__new__(m.ModelRetrainer)
         retrainer.directory = self.root
         retrainer.irrigation = Mock()
-        retrainer.log = Mock()
-        retrainer.log.get_model_status.return_value = {'new_model_path': 'models/irrigation_5.joblib'}
+        retrainer.log = self.log
+        self.log.log_model_training('test')
+        self.log.log_model_ready('models/irrigation_5.joblib')
         model = object()
         with patch.object(m, 'load_validated_model', return_value=model):
             retrainer._activate()
         self.assertIs(retrainer.irrigation.model, model)
         self.assertEqual(len(list(self.models.glob('irrigation_*.joblib'))), 3)
-        self.assertIn('irrigation_5.joblib', (self.root.parent / 'config.cfg').read_text())
+        self.assertEqual(self.log.get_model_status()['model_path'], 'IrrigationPrediction/models/irrigation_5.joblib')
         self.assertIn('detection_path = ComputerVision/detector.pt', (self.root.parent / 'config.cfg').read_text())
 
     def test_real_bootstrap_from_base_datasets_and_reload(self):
@@ -114,7 +150,8 @@ class LifecycleTests(unittest.TestCase):
         (self.models / 'irrigation_0.joblib').write_bytes(b'corrupt')
         model = m.load_or_train_initial_model(self.root, self.log)
         self.assertTrue(hasattr(model, 'predict'))
-        self.log.clear_model_status.assert_called_once()
+        self.assertFalse(self.log.get_model_status()['new_model_ready'])
+        self.assertTrue(self.log.get_model_status()['model_path'])
         with patch.object(m.subprocess, 'run') as run:
             m.load_or_train_initial_model(self.root, self.log)
         run.assert_not_called()

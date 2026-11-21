@@ -3,7 +3,8 @@
         "new_model_pending": false,
         "new_model_ready": false,
         "new_model_path": "",
-        "last_retrain_period": "2026-11-19T11"
+        "last_retrain_period": "2026-11-19T11",
+        "model_path": "IrrigationPrediction/models/irrigation_7297e880d6db497f97cef027a5732882.joblib"
     },
     "node_profile": {
         "61635581802032": {
@@ -12,7 +13,26 @@
             "pwp": 10.0,
             "madp": 36.0,
             "fc": 50.0,
-            "sp": 80.0
+            "sp": 80.0,
+            "auto_irrigation_enabled": false
+        },
+        "242017972311420": {
+            "node_id": "242017972311420",
+            "plant": "default",
+            "pwp": 10.0,
+            "madp": 20.0,
+            "fc": 36.0,
+            "sp": 50.0,
+            "auto_irrigation_enabled": true
+        },
+        "220652526865096": {
+            "node_id": "220652526865096",
+            "plant": "default",
+            "pwp": 10.0,
+            "madp": 20.0,
+            "fc": 36.0,
+            "sp": 50.0,
+            "auto_irrigation_enabled": true
         }
     }
 }

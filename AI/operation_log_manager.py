@@ -11,7 +11,8 @@ LOG_STRUCTURE = {
     "model_status": {
         "new_model_pending": False,
         "new_model_ready": False,
-        "new_model_path": ""
+        "new_model_path": "",
+        "model_path": ""
     },
     "node_profile": {}
 }
@@ -54,6 +55,8 @@ class OperationLogManager:
         if self.log_file_path.exists():
             with open(self.log_file_path, 'r', encoding='utf-8') as file:
                 log = json.load(file)
+            if isinstance(log, dict) and isinstance(log.get("model_status"), dict):
+                log["model_status"].setdefault("model_path", "")
             if self.verify_log_integrity(log):
                 return log
         return deepcopy(LOG_STRUCTURE)
@@ -84,6 +87,14 @@ class OperationLogManager:
 
     def get_model_status(self) -> dict:
         return self.load_log()["model_status"]
+
+    def set_model_path(self, model_path: str) -> None:
+        """Persist the validated active model without changing pending retrain state."""
+        if not isinstance(model_path, str) or not model_path:
+            raise ValueError("Active model path must be a non-empty string.")
+        log = self.load_log()
+        log["model_status"]["model_path"] = model_path
+        self.save_log(log)
 
     def initialize_retrain_period(self, period: str) -> None:
         log = self.load_log()
