@@ -38,7 +38,7 @@ class MQTTTests(unittest.TestCase):
 
     def ready(self):
         self.connect()
-        self.network.on_subscribe(self.network, None, 7, [reason(PacketTypes.SUBACK, 1)], None)
+        self.network.on_subscribe(self.network, None, 7, [reason(PacketTypes.SUBACK, 1)] * 2, None)
 
     def receive(self, payload=b"1", topic=BlynkTopics.PUMP_COMMAND, retain=False):
         message = mqtt.MQTTMessage(topic=topic.encode())
@@ -63,11 +63,12 @@ class MQTTTests(unittest.TestCase):
         self.network.reconnect_delay_set.assert_called_once_with(min_delay=1, max_delay=30)
         self.connect()
         self.network.connect_async.assert_called_once_with("sgp1.blynk.cloud", 8883, keepalive=45)
-        self.network.subscribe.assert_called_once_with(BlynkTopics.PUMP_COMMAND, qos=1)
+        self.network.subscribe.assert_called_once_with([(BlynkTopics.PUMP_COMMAND, 1),
+                                                        (BlynkTopics.AUTO_IRRIGATION_ENABLED, 1)])
         self.assertFalse(self.adapter.commands_ready)
         self.network.on_subscribe(self.network, None, 999, [reason(PacketTypes.SUBACK, 1)], None)
         self.assertFalse(self.adapter.commands_ready)
-        self.network.on_subscribe(self.network, None, 7, [reason(PacketTypes.SUBACK, 1)], None)
+        self.network.on_subscribe(self.network, None, 7, [reason(PacketTypes.SUBACK, 1)] * 2, None)
         self.assertTrue(self.adapter.commands_ready)
         self.assertIsNone(self.adapter.last_command_error)
         self.network.publish.assert_not_called()
@@ -88,11 +89,20 @@ class MQTTTests(unittest.TestCase):
 
     def test_current_template_command_name_is_used_exactly(self):
         self.ready()
-        self.network.subscribe.assert_called_once_with("downlink/ds/pump_command", qos=1)
+        self.assertEqual(self.network.subscribe.call_args.args[0][0], ("downlink/ds/pump_command", 1))
         self.receive(topic="downlink/ds/Pump Command")
         self.assertIsNone(self.adapter.poll_command())
         self.receive(topic="downlink/ds/pump_command")
         self.assertTrue(self.adapter.poll_command().requested_on)
+
+    def test_auto_mode_uses_its_own_exact_datastream_name(self):
+        self.ready()
+        self.receive(b"0", topic="downlink/ds/Auto Irrigation Enabled")
+        self.assertIsNone(self.adapter.poll_command())
+        self.receive(b"0", topic=BlynkTopics.AUTO_IRRIGATION_ENABLED)
+        command = self.adapter.poll_command()
+        self.assertEqual(command.control, "auto")
+        self.assertFalse(command.requested_on)
 
     def test_only_fresh_valid_command_messages_are_accepted(self):
         self.receive()
@@ -139,7 +149,7 @@ class MQTTTests(unittest.TestCase):
         self.addCleanup(adapter.close)
         adapter.start()
         self.network.on_connect(self.network, None, None, reason(PacketTypes.CONNACK), None)
-        self.network.on_subscribe(self.network, None, 7, [reason(PacketTypes.SUBACK, 1)], None)
+        self.network.on_subscribe(self.network, None, 7, [reason(PacketTypes.SUBACK, 1)] * 2, None)
         with patch("cloud_edge.commands.monotonic", return_value=10) as clock:
             self.receive()
             command = adapter.poll_command()

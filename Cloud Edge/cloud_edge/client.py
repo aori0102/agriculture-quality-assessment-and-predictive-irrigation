@@ -3,6 +3,7 @@
 from threading import Lock
 
 from .blynk_http import BlynkHTTP
+from .datastreams import BlynkPins
 from .blynk_mqtt import BlynkMQTT
 from .commands import PumpCommand
 from .config import CloudConfig
@@ -106,7 +107,7 @@ class CloudClient:
             air_humidity_pct: Humidity percentage, 0–100; rounded to V6.
             plant_status: Edge-generated assessment string for V2.
             predicted_moisture_pct: Prediction, 0–100; rounded to V5.
-            pump_is_on: Physically confirmed boolean pump state for V4.
+            pump_is_on: Firmware-confirmed controller state for V4.
 
         None omits a field; an empty snapshot makes no request. Booleans are
         not measurements. Uploads block until completion/failure and do not
@@ -157,15 +158,39 @@ class CloudClient:
         )
 
     def report_pump_status(self, *, node_id: str, is_on: bool) -> None:
-        """Upload confirmed hardware state to V4; return None.
+        """Upload firmware-confirmed controller state to V4; return None.
 
         node_id must match the bound node. is_on must be bool, not None or an
-        integer. Call after device confirmation, never just on command receipt.
+        integer. Call after a device event, never just on command receipt.
         Raises ValueError for invalid inputs and CloudError for upload failures.
         """
         if type(is_on) is not bool:
             raise ValueError("is_on must be a boolean confirmed by the device.")
         self.send_snapshot(node_id=node_id, pump_is_on=is_on)
+
+    def report_control_mode(self, *, node_id: str, enabled: bool) -> None:
+        if type(enabled) is not bool:
+            raise ValueError("enabled must be a boolean.")
+        with self._lock:
+            self._ensure_open()
+            if node_id != self._node_id:
+                raise ValueError("node_id does not match this CloudClient's binding.")
+            self._mqtt.expect_mode_echo(enabled)
+            self._http.write_control(BlynkPins.AUTO_IRRIGATION_ENABLED, int(enabled))
+
+    def report_pump_detail(self, *, node_id: str, detail: str) -> None:
+        with self._lock:
+            self._ensure_open()
+            if node_id != self._node_id:
+                raise ValueError("node_id does not match this CloudClient's binding.")
+            self._http.write_control(BlynkPins.PUMP_STATUS_DETAIL, detail)
+
+    def report_node_catalog(self, *, node_id: str, catalog: str) -> None:
+        with self._lock:
+            self._ensure_open()
+            if node_id != self._node_id:
+                raise ValueError("node_id does not match this CloudClient's binding.")
+            self._http.write_control(BlynkPins.NODE_CATALOG, catalog)
 
     def poll_command(self) -> PumpCommand | None:
         """Consume the latest unexpired PumpCommand without waiting on network I/O.

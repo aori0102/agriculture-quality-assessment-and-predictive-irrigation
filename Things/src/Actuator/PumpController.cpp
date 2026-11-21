@@ -120,6 +120,7 @@ void PumpController::stop() {
     turnMotorOff();
 
     m_isRunning = false;
+    m_stateChanged = true;
     m_durationMs = 0;
     m_startTime = 0;
     if (m_stateCallback) m_stateCallback(false);
@@ -158,6 +159,12 @@ uint8_t PumpController::getPwmDutyValue() const {
 
 bool PumpController::isRunning() const {
     return m_isRunning;
+}
+
+bool PumpController::takeStateChange() {
+    const bool changed = m_stateChanged;
+    m_stateChanged = false;
+    return changed;
 }
 
 uint32_t PumpController::getRemainingTime() const {

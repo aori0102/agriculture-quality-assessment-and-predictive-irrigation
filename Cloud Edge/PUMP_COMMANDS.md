@@ -1,90 +1,52 @@
-# Blynk irrigation requests → Edge flag
+# Irrigation control and confirmation
 
-The same-process launcher now consumes Blynk V3 (`pump_command`) requests and
-calls the existing AI proxy functions:
+The combined Edge launcher owns irrigation policy. Blynk supplies a request for
+one bound node; it does not authorize a physical state by itself. Run the Edge
+with `python "Cloud Edge/run_edge.py"`. Each Blynk device token maps to one Edge
+node, and commands are sent only to that node's local MQTT topic.
 
-| Request | Edge function |
-| --- | --- |
-| ON (`1`) | `enable_irrigation_on_node(node_id=...)` |
-| OFF (`0`) | `disable_irrigation_on_node(node_id=...)` |
+| Pin | Name | Behavior |
+| --- | --- | --- |
+| V3 | `pump_command` | `1` requests one 30 second manual run; `0` requests stop and blocks automatic starts. |
+| V17 | `auto_irrigation_enabled` | `1` restores automatic decisions; `0` selects manual OFF and requests stop. |
+| V4 | `pump_status` | Last state reported by the firmware controller (`0`/`1`). It does not prove water flow. |
+| V18 | `pump_status_detail` | Text status: pending, confirmed, or unknown. |
 
-Those functions save `auto_irrigation_enabled` in the Edge operation log.
-**Saved intent is not physical pump state.** This integration sends no direct
-pump actuation commands and never writes V4 (`pump_status`) or V15 (profile
-status). It adds no datastream. Existing hardware-confirmed V4 reporting remains
-available separately through `CloudClient.report_pump_status()`.
+V3 `1` sets manual mode. If the pump is already running, it does not extend the
+run. A start requires a fresh firmware OFF event; unknown state cannot cause an
+automatic or manual start. Automatic predictions are capped at the firmware's
+60 second per-command limit; a later sample may authorize another run. The
+saved `irrigation_status` Boolean carries the mode: `true` is Auto and `false`
+is Manual OFF. Existing saved values follow this mapping; missing values default
+to Auto. The launcher publishes the saved mode to V17 on startup.
 
-## Startup and ownership
+The Edge adds a unique `command_id`, node ID, 10 second TTL, and bounded duration
+to local MQTT commands. Firmware checks node and Edge identity, time and TTL,
+rejects invalid durations, and persists the last start ID to avoid starting the
+same request twice after restart. Firmware publishes boot ID, increasing sequence,
+command ID, run ID, and short-lived `pump_started`/`pump_stopped` events. The Edge
+accepts fresh events, correlates responses to pending commands, and only then
+updates V4. A command acknowledgement timeout sets V18 to unknown and prevents
+another start until fresh device state arrives; commands are not blindly retried.
+Automatic mode restoration while the pump is running waits for a confirmed stop.
 
-```bash
-python "Cloud Edge/run_edge.py" --check
-python "Cloud Edge/run_edge.py"
-```
+Firmware repeats its controller state every five seconds on local MQTT. After
+15 seconds without a valid event, Edge marks the state unknown and blocks starts.
+On local MQTT disconnect, the Edge clears its known state and pending commands.
+Firmware continues to enforce the bounded run locally. A reconnect publishes a
+fresh firmware state; old dashboard ON values are not replayed. V4 is the last
+confirmed controller state and may remain stale during a disconnect; V18 carries
+the current uncertainty.
 
-The existing AI configuration prerequisite documented in [PROFILES.md](PROFILES.md)
-still applies. Normal startup runs AI's existing application behavior; this is
-not a hardware dry run. Cloud Edge owns the dispatcher and adapters; AI owns
-internal storage and consumption of the saved irrigation flag.
+The Cloud MQTT callback validates and queues requests. The dispatcher checks
+expiry, connection generation, node binding, and registered Edge profile before
+calling the Edge coordinator. The Edge coordinator and profile adapter share an
+operation lock in the combined launcher.
 
-The launcher constructs a single shared `threading.RLock` and injects it into
-both `EdgeProfileBackend(..., operation_lock=...)` and
-`EdgePumpBackend(enable, disable, load_log, operation_lock=...)`. Use the same
-lock and one pump adapter when embedding these components manually. Independent
-AI writers use the operation log manager's own reentrant lock for atomic read/modify/write operations. The final irrigation permission check and command publish also hold that lock.
+## Verification
 
-`PumpDispatcher(clients_by_node_id, backend, interval=0.1)` polls all configured
-clients in one background thread. Start it after clients are constructed. Close
-it before closing those clients. Startup failures and normal launcher shutdown
-perform cleanup in that order. An already-entered Edge operation finishes before
-the dispatcher joins; injected Edge functions must return promptly.
-
-## Request semantics
-
-- The MQTT callback validates and retains only the latest request per node.
-- The dispatcher acquires the operation lock nonblockingly **before polling**.
-  While a profile operation holds it, a queued OFF can replace ON and disconnect
-  can clear pending intent.
-- The adapter validates node binding and registry membership, checks the saved
-  flag's type, and rechecks expiry, connection readiness/generation, and shutdown
-  after reading Edge state and before updating it.
-- A saved flag already matching the request skips the write. A missing flag on
-  a registered node can be set by a fresh request; a malformed non-Boolean flag
-  is reported as a synchronization failure.
-- After a write, exact Boolean readback is required. Exceptions/readback mismatch
-  report uncertain state; writes are not automatically retried.
-- Retained commands, expired requests, and queued commands cleared by disconnect
-  are not replayed. Startup never converts stored flags or V3 values into requests.
-- An OFF received during an already-entered Edge update is processed afterward.
-  That update cannot be cancelled safely. This adapter is not an emergency-stop
-  mechanism and does not claim physical stopping behavior.
-
-The default command lifetime remains five seconds from local MQTT receipt;
-there is no server-side issue timestamp. `CloudClient.command_connection_id`
-is a read-only connection generation used to invalidate work across reconnect.
-
-## Local reporting
-
-`dispatcher.last_result(node_id)` returns an immutable `PumpRequestResult`:
-`node_id`, `requested_on`, `outcome`, and `message`. Outcome is one of `saved`,
-`unchanged`, `rejected`, `sync_failed`, or `discarded`. `requested_on` is `None`
-only for an unexpected dispatch-layer error where no valid request is known.
-
-`dispatcher.last_error(node_id)` returns the latest rejection/synchronization
-error message, or `None`. Results are also emitted through the
-`cloud_edge.edge_pump` logger: INFO for normal results, WARNING for failures.
-Enable INFO logging in the host application to view successful saves. Messages
-never include raw Edge exceptions or credentials. There is deliberately no
-Blynk result-stream write for this flag-saving operation.
-
-## Verification and limits
-
-```bash
-PYTHONPATH="Cloud Edge" python -m unittest discover -s "Cloud Edge/tests" -t "Cloud Edge" -v
-```
-
-Offline tests exercise mapping, exact readback, duplicate handling, unknown
-nodes, expiry/reconnect, lock contention, and shutdown ordering. The actual AI
-proxy's enable/disable functions are exercised against a temporary operation log.
-No live broker or hardware is used.
-
-The AI storage writer uses atomic replacement. OFF prevents future automatic irrigation; it does not cancel an active run. New nodes default to OFF, while legacy Boolean flags are migrated on read. The node enforces a maximum 60-second run at raw PWM duty 100/255. Successful starts/stops and successful captures are reported on `/events`; see the README for the event contract. Physical pump flow and live delivery still require hardware testing.
+Run `PYTHONPATH="AI:Cloud Edge" python -m unittest discover -s "Cloud Edge/tests" -t "Cloud Edge" -q`
+and `PYTHONPATH="AI:Cloud Edge" python -m unittest AI/test_pump_control.py AI/test_cloud_reporter.py -q`.
+These are offline tests. Firmware compilation and real pump behavior require the
+hardware build environment and device test. Wire V3 and V17 as separate switch
+controls, V4 as state display, and V18 as text status in the Blynk dashboard.

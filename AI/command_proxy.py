@@ -26,6 +26,7 @@ class CommandProxy:
         action: ActionIndex,
         ttl_ms: int = 60_000,
         duration_ms: int = 0,
+        command_id: str | None = None,
     ) -> bool:
         """Queue a command on the Edge MQTT client."""
         if not isinstance(node_id, str) or not node_id.strip() or any(
@@ -68,6 +69,8 @@ class CommandProxy:
             "ttl_ms": ttl_ms,
             "duration_ms": duration_ms,
         }
+        if command_id is not None:
+            payload["command_id"] = command_id
         
         logger.debug("TX topic=%s payload=%s", topic, payload)
 

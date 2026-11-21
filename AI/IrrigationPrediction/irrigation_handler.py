@@ -14,9 +14,8 @@ from pathlib import Path
 from configparser import ConfigParser
 from datetime import datetime, timezone
 from time import monotonic
-from action_index import ActionIndex
-from command_proxy import command_proxy
 from operation_log_manager import operation_log_manager
+from pump_control import pump_coordinator
 
 class IrrigationHandler:
     def __init__(self):
@@ -230,6 +229,14 @@ class IrrigationHandler:
                 return False
             return telemetry_handler.record_irrigation_data(
                 target_duration, node_id=node_id, timestamp=target_sample_time)
+        # The device accepts one bounded run. A later sample may authorize another.
+        run_duration_ms = min(int(target_duration * 60000), pump_coordinator.max_duration_ms)
+        if not pump_coordinator.request_automatic_start(node_id, run_duration_ms):
+            telemetry_handler.record_irrigation_data(0, node_id=node_id, timestamp=target_sample_time)
+            return True
+        if not telemetry_handler.record_irrigation_data(run_duration_ms / 60000, node_id=node_id, timestamp=target_sample_time):
+            return False
+        return True
     
     
     def configure_command_publisher(self, client: mqtt.Client, config: ConfigParser) -> None:
@@ -268,6 +275,7 @@ class IrrigationHandler:
             ttl_ms=300_000,
             duration_ms=duration_ms
         )
+        pump_coordinator.request_automatic_start(node_id, duration_ms)
 
 
 irrigation_handler = IrrigationHandler()

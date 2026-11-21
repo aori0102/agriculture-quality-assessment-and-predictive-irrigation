@@ -33,6 +33,10 @@ class ProfileHTTPTests(unittest.TestCase):
         self.assertFalse(call.kwargs["allow_redirects"])
         self.assertEqual(call.kwargs["timeout"], 10)
 
+    def test_unset_description_reads_as_allowed_empty_text(self):
+        self.response._content = json.dumps(draft(v8=None)).encode()
+        self.assertEqual(self.http.read_profile_snapshot()["v8"], "")
+
     def test_response_errors_are_sanitized(self):
         for body in (b"test-secret", b"[]", b'{"error":"test-secret"}'):
             self.response._content = body

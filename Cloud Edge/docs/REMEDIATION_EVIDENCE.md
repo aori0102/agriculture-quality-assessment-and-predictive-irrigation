@@ -16,4 +16,4 @@ Final offline checks: `PYTHONPATH='AI:Cloud Edge' .venv/bin/python -m unittest d
 
 ## Remaining manual verification
 
-Use a controlled approved test node with a simulated pump and an explicitly authorized disposable Blynk Device. Verify accepted MQTT telemetry creates exactly one Device, V0/V1/V6 arrive through the reporter, AI V2/V5 and confirmed V4 use their existing paths, commands subscribe without actuating hardware, and restart reuses the binding. Confirm the regional host and quota before creation. An operator owns removal of disposable Devices. The public MQTT broker still permits node-ID spoofing; this prototype requires a controlled lab or a separately coordinated authenticated broker.
+Historical note: this was written before open enrollment. For current setup and the fresh-node runbook, use [DYNAMIC_PROVISIONING.md](DYNAMIC_PROVISIONING.md). The public MQTT broker still permits node-ID spoofing; this prototype requires a controlled lab or a separately coordinated authenticated broker.

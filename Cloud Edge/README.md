@@ -13,7 +13,7 @@ Cloud Edge includes an adapter to the existing AI proxy; it does not change irri
 
 ## Setup
 
-For optional approved-node device creation, see [Dynamic provisioning MVP](docs/DYNAMIC_PROVISIONING.md). It uses the independent Python MCP OAuth client and a separate private device store.
+For optional open Node enrollment, see [Dynamic provisioning MVP](docs/DYNAMIC_PROVISIONING.md). It uses the independent Python MCP OAuth client and a separate private device store.
 
 From the repository root, using the project's virtual environment:
 
@@ -23,13 +23,18 @@ python -m pip install -r "Cloud Edge/requirements.txt"
 
 Create a root `.env` using `.env.example` as a reference. The combined launcher
 uses `BLYNK_DEVICES_JSON` with a regional host and referenced token variable for
-each static node. Dynamic-only mode uses `BLYNK_DEVICES_JSON='[]'`, an approved
-node list, and an operator-selected regional host; hybrid mode keeps the static
+each static node. Dynamic-only mode uses `BLYNK_DEVICES_JSON='[]'` and an
+operator-selected regional host; hybrid mode keeps the static
 entries while enabling dynamic provisioning. `CloudConfig.from_env()` still
 supports a standalone single client through `BLYNK_SERVER` and
 `BLYNK_AUTH_TOKEN`. Existing environment variables override `.env` values.
 Configuration lookup does not depend on the working directory and does not
 modify the process environment.
+
+With `BLYNK_PROVISIONING_ENABLED=1`, every Node whose telemetry Edge accepts
+and whose ID matches the provisioning format is eligible for automatic Blynk
+Device creation. Enrollment does not authenticate the MQTT sender; a publisher
+able to impersonate a Node on the configured broker can trigger creation.
 
 Use one client for one fixed node and one Blynk device. Every upload requires
 the same `node_id`; it is checked locally, not transmitted to Blynk. The edge
@@ -65,7 +70,7 @@ finally:
 
 | Method/property | Contract |
 | --- | --- |
-| `send_snapshot(*, node_id, soil_index_pct=None, temperature_c=None, air_humidity_pct=None, plant_status=None, predicted_moisture_pct=None, pump_is_on=None)` | One batch containing supplied fields. `pump_is_on` must be physically confirmed. |
+| `send_snapshot(*, node_id, soil_index_pct=None, temperature_c=None, air_humidity_pct=None, plant_status=None, predicted_moisture_pct=None, pump_is_on=None)` | One batch containing supplied fields. `pump_is_on` requires a firmware state event. |
 | `send_telemetry(*, node_id, soil_index_pct=None, temperature_c=None, air_humidity_pct=None)` | Sensor-only convenience method. |
 | `send_ai_results(*, node_id, plant_status=None, predicted_moisture_pct=None)` | AI-output convenience method. |
 | `report_pump_status(*, node_id, is_on)` | Report a boolean state confirmed by the device. |
@@ -107,9 +112,12 @@ empty snapshot sends nothing. Closing waits for any active upload to finish.
 | V1 | `weather_temp` | Finite number, sent as float |
 | V2 | `plant_status` | String supplied by the edge |
 | V3 | `pump_command` | Inbound `0`/`1`; never uploaded by this package |
-| V4 | `pump_status` | Confirmed boolean, uploaded as `0`/`1` |
+| V4 | `pump_status` | Firmware-confirmed controller state, uploaded as `0`/`1` |
 | V5 | `predicted_moisture` | Percentage, converted to integer |
 | V6 | `weather_humidity` | Percentage, converted to integer |
+| V17 | `auto_irrigation_enabled` | Inbound Auto switch, `0`/`1`; Edge also publishes saved mode |
+| V18 | `pump_status_detail` | Pending, confirmed, or unknown text from Edge |
+| V19 | `node_catalog` | Read-only JSON list of registered Blynk-bound nodes for the profile widget |
 
 These names match the current BTL template export. The Edge-facing Python
 arguments remain `soil_index_pct`, `temperature_c`, `air_humidity_pct`, and
@@ -223,9 +231,9 @@ python "Cloud Edge/run_edge.py"
 See [PROFILES.md](PROFILES.md) for the existing AI configuration prerequisite,
 saved-versus-active semantics, metadata storage, and the adapter API.
 
-The launcher also forwards V3 requests to the existing AI enable/disable
-interfaces. See [pump-request wiring](PUMP_COMMANDS.md). Success verifies the saved
-irrigation flag; it does not update V4 or confirm physical pump execution.
+The launcher routes V3 and V17 requests through the Edge pump coordinator.
+See [irrigation control and confirmation](PUMP_COMMANDS.md) for the mode,
+firmware event, acknowledgement, and timeout behavior.
 
 ## Outbound data and device events
 

@@ -18,6 +18,7 @@ class CloudReporter:
         self.last_pump_event = {}
         self.last_capture_event = {}
         self.lock = Lock()
+        self.on_pump_event = None
 
     def configure(self, clients):
         if self.worker is not None:
@@ -86,6 +87,9 @@ class CloudReporter:
                         return False
                     self.last_capture_event[node_id] = {"sent_at": sent, "sample_seq": sequence}
                 logger.info("CAPTURE node=%s seq=%s | node confirmed capture/upload queued", node_id, sequence)
+                return True
+            if self.on_pump_event is not None:
+                self.on_pump_event(node_id, data)
                 return True
             with self.lock:
                 previous = self.last_pump_event.get(node_id)

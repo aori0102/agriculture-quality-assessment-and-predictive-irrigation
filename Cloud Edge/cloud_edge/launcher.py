@@ -18,6 +18,7 @@ from .edge_profiles import EdgeProfileBackend
 from .edge_pump import EdgePumpBackend, PumpDispatcher
 from .device_registry import RuntimeDeviceRegistry
 from .device_store import CreateJournal, DeviceStore
+from .node_catalog import encode_node_catalog
 from .provisioning import DeviceProvisioningWorker, stable_name
 from .blynk_provisioner import BlynkProvisioner
 
@@ -59,10 +60,12 @@ def run_with_clients(
     provisioning=None,
     telemetry_handler=None,
     reporter=None,
+    pump_coordinator=None,
     instance_lock=None,
 ):
     """One shared adapter across all devices; close even after partial startup."""
     with ExitStack() as resources:
+        bindings = tuple(bindings)
         if instance_lock is not None:
             lock_fd = acquire_instance_lock(instance_lock)
             resources.callback(os.close, lock_fd)
@@ -79,6 +82,7 @@ def run_with_clients(
                 client.close()
                 raise
         worker = None
+        store = None
         if provisioning is not None:
             store = DeviceStore(provisioning["device_store"])
             persisted = store.load()
@@ -86,6 +90,10 @@ def run_with_clients(
                 record.token for record in persisted.values()
             }:
                 raise ValueError("Static and persisted device tokens conflict.")
+            if {binding.device_id for binding in bindings if getattr(binding, "device_id", None) is not None} & {
+                record.device_id for record in persisted.values()
+            }:
+                raise ValueError("Static and persisted device IDs conflict.")
             for node_id, record in persisted.items():
                 if record.stable_name != stable_name(provisioning["edge_id"], node_id):
                     raise ValueError(
@@ -107,18 +115,59 @@ def run_with_clients(
         if reporter is not None:
             reporter.configure(clients)
             resources.callback(reporter.close)
+
+        binding_info = {binding.node_id: (getattr(binding, "device_id", None),
+                                          getattr(binding.config, "server", None))
+                        for binding in bindings}
+
+        def publish_catalog():
+            if reporter is None:
+                return
+            persisted = store.load() if store is not None else {}
+            entries = []
+            for node_id, _ in clients.snapshot():
+                if node_id in binding_info:
+                    device_id, server = binding_info[node_id]
+                else:
+                    record = persisted[node_id]
+                    device_id, server = record.device_id, record.server
+                entries.append((node_id, device_id, server))
+            if any(server is None for _, _, server in entries):
+                return
+            catalog = encode_node_catalog(entries)
+            for node_id, _ in clients.snapshot():
+                reporter.submit("report_node_catalog", node_id=node_id, catalog=catalog)
+
+        publish_catalog()
+
+        def report_initial_state(node_id):
+            if reporter is None or pump_coordinator is None:
+                return
+            reporter.submit("report_control_mode", node_id=node_id,
+                            enabled=pump_coordinator.auto_enabled(node_id))
+            reporter.submit("report_pump_detail", node_id=node_id,
+                            detail="unknown: awaiting device state")
+
+        if reporter is not None and pump_coordinator is not None:
+            for node_id, _ in clients.snapshot():
+                report_initial_state(node_id)
+
+        def activated(node_id, snapshot):
+            if reporter is not None:
+                reporter.submit("send_telemetry", node_id=node_id, **snapshot)
+                report_initial_state(node_id)
+                publish_catalog()
+
         if provisioning is not None:
             worker = DeviceProvisioningWorker(
                 edge_id=provisioning["edge_id"],
-                approved=provisioning["approved"],
                 server=provisioning["server"],
                 store=store,
                 registry=clients,
                 provisioner=BlynkProvisioner(provisioning["oauth_store"]),
                 client_factory=client_factory,
                 profile_backend=backend,
-                on_ready=(lambda node_id, snapshot: reporter.submit(
-                    "send_telemetry", node_id=node_id, **snapshot)) if reporter is not None else None,
+                on_ready=activated if reporter is not None else None,
             )
             resources.callback(worker.close)  # Stop before closing clients.
             worker.start()
@@ -186,20 +235,14 @@ def main(argv=None) -> int:
             cfg = ConfigParser()
             cfg.read(ai_directory / "config.cfg", encoding="utf-8-sig")
             edge_id = cfg.get("edge", "edge_id").strip()
-            approved = [
-                node.strip()
-                for node in values.get("BLYNK_APPROVED_NODES", "").split(",")
-                if node.strip()
-            ]
             server = (values.get("BLYNK_PROVISION_SERVER") or "").strip()
-            if not edge_id or not approved or not server:
+            if not edge_id or not server:
                 raise ValueError(
-                    "Dynamic provisioning requires edge_id, BLYNK_APPROVED_NODES, and BLYNK_PROVISION_SERVER."
+                    "Dynamic provisioning requires edge_id and BLYNK_PROVISION_SERVER."
                 )
             CloudConfig(server, "validation-placeholder")
             provisioning = {
                 "edge_id": edge_id,
-                "approved": approved,
                 "server": server,
                 "oauth_store": REPOSITORY / "Cloud Edge/runtime/mcp_oauth.json",
                 "device_store": REPOSITORY / "Cloud Edge/runtime/blynk_devices.json",
@@ -234,6 +277,7 @@ def main(argv=None) -> int:
         )
         return 2
     operation_lock = RLock()
+    app.pump_coordinator.lock = operation_lock
     backend = EdgeProfileBackend(
         proxy.update_node_profile,
         proxy.operation_log_manager.load_log,
@@ -244,6 +288,10 @@ def main(argv=None) -> int:
         proxy.disable_irrigation_on_node,
         proxy.operation_log_manager.load_log,
         operation_lock=operation_lock,
+        control_request=lambda node_id, control, enabled: (
+            app.pump_coordinator.request_auto(node_id, enabled) if control == "auto"
+            else app.pump_coordinator.request_manual(node_id, enabled)
+        ),
     )
     try:
         handler = importlib.import_module(
@@ -257,6 +305,7 @@ def main(argv=None) -> int:
             provisioning=provisioning,
             telemetry_handler=handler,
             reporter=reporter,
+            pump_coordinator=app.pump_coordinator,
             instance_lock=REPOSITORY / "Cloud Edge/runtime/edge.lock",
         )
     except KeyboardInterrupt:

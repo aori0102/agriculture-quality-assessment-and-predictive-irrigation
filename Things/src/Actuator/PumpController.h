@@ -34,6 +34,7 @@ public:
     uint8_t getPwmDutyValue() const;
 
     bool isRunning() const;
+    bool takeStateChange();
 
     uint32_t getRemainingTime() const;
 
@@ -46,6 +47,7 @@ private:
     uint8_t m_pwmDuty = DEFAULT_PWM_DUTY;
 
     bool m_isRunning = false;
+    bool m_stateChanged = false;
     bool m_pwmInitialized = false;
 
     uint32_t m_startTime = 0;

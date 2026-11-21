@@ -123,7 +123,7 @@ class WiringTests(unittest.TestCase):
             ThreadPoolExecutor=Mock(), ModelRetrainer=Mock(),
             operation_log_manager=Mock(), irrigation_handler=Mock(),
             irrigation_data_handler=Mock(), command_proxy=Mock(), capture_handler=Mock(),
-            telemetry_handler=Mock())
+            telemetry_handler=Mock(), pump_coordinator=Mock())
         self.load_functions('app.py', namespace)
         with patch.object(mqtt, 'Client', return_value=client):
             namespace['main']()
@@ -165,5 +165,17 @@ class LauncherWiringTests(unittest.TestCase):
             [SimpleNamespace(node_id='esp01',config=object())],
             client_factory=Mock(return_value=client),reporter=reporter)
         self.assertEqual(events,[('configured',{'esp01':client}),'edge_running','reporter_closed','client_closed'])
+
+    def test_launcher_reports_saved_mode_and_unknown_status(self):
+        from cloud_edge.launcher import run_with_clients
+        client, reporter, coordinator = Mock(), Mock(), Mock()
+        coordinator.auto_enabled.return_value = False
+        run_with_clients(lambda: None, object(),
+            [SimpleNamespace(node_id='esp01', config=object())],
+            client_factory=Mock(return_value=client), reporter=reporter,
+            pump_coordinator=coordinator)
+        reporter.submit.assert_any_call('report_control_mode', node_id='esp01', enabled=False)
+        reporter.submit.assert_any_call('report_pump_detail', node_id='esp01',
+                                         detail='unknown: awaiting device state')
 
 if __name__ == '__main__': unittest.main()

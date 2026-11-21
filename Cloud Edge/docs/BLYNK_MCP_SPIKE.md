@@ -15,4 +15,4 @@ Status: **GO for the academic-project MVP with operator reauthorization on token
 
 ## Gate before implementation
 
-The user accepted the long-lived OAuth grant and manual reauthorization for this academic project. Dynamic mode is disabled by default and requires an explicit approved-node list and regional host. A create/store crash or lost token is marked for administrative reconciliation; the Edge must not create a duplicate. The regional host is operator configured and was validated with one disposable device. An end-to-end physical-node telemetry trigger remains unverified.
+Historical note: the original gate required an approved-node list. The current [dynamic provisioning setup](DYNAMIC_PROVISIONING.md) uses open enrollment when enabled. A create/store crash or lost token still requires administrative reconciliation; the Edge must not create a duplicate. The regional host is operator configured and was validated with one disposable device. An end-to-end physical-node telemetry trigger remains unverified.

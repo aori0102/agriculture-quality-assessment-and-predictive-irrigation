@@ -1,8 +1,8 @@
-"""Bounded, nonblocking telemetry-to-provisioning bridge."""
+"""Nonblocking telemetry-to-provisioning bridge with per-node coalescing."""
 
 from hashlib import sha256
 import logging
-from queue import Empty, Full, Queue
+from queue import Empty, Queue
 import re
 from threading import Event, Lock, Thread
 
@@ -21,14 +21,14 @@ def stable_name(edge_id: str, node_id: str) -> str:
 
 
 class DeviceProvisioningWorker:
-    def __init__(self, *, edge_id, approved, server, store, registry, provisioner,
+    def __init__(self, *, edge_id, server, store, registry, provisioner,
                  client_factory, profile_backend, on_ready=None):
-        self.edge_id, self.approved, self.server = edge_id, frozenset(approved), server
+        self.edge_id, self.server = edge_id, server
         self.store, self.registry, self.provisioner = store, registry, provisioner
         self.journal = CreateJournal(store.path.with_name("pending_creates.json"))
         self.client_factory, self.profile_backend = client_factory, profile_backend
         self.on_ready = on_ready
-        self._queue = Queue(maxsize=128)
+        self._queue = Queue()
         self._pending = set()
         self._lock = Lock()
         self._stop = Event()
@@ -60,9 +60,6 @@ class DeviceProvisioningWorker:
 
     def observe_node(self, node_id: str, snapshot: dict | None = None):
         """Called after Edge accepted and registered telemetry; never blocks MQTT."""
-        if node_id not in self.approved:
-            self.status[node_id] = "unapproved"
-            return False
         if self.status.get(node_id) == "needs_reconciliation":
             return False
         try:
@@ -74,12 +71,7 @@ class DeviceProvisioningWorker:
             if node_id in self._pending or self._stop.is_set():
                 return False
             self._pending.add(node_id)
-            try:
-                self._queue.put_nowait((node_id, snapshot))
-            except Full:
-                self._pending.remove(node_id)
-                self.status[node_id] = "queue_full"
-                return False
+            self._queue.put_nowait((node_id, snapshot))
         return True
 
     def _activate(self, record):
