@@ -35,7 +35,7 @@
   <div class="sectionhead"><div><div class="sectiontitle">Irrigation Configuration</div><div class="desc">Adjust values, then apply them together</div></div><span class="count">4 PARAMETERS</span></div>
   <div id="setupMessage" class="message" role="status" aria-live="polite"></div>
   <section class="params" aria-label="Irrigation parameters">
-   <div class="parameter" data-key="mad"><div class="paramhead"><div><div class="paramtitle">MAD</div><div class="paramdesc">Management Allowed Depletion</div></div><div class="value"><span class="reading">40</span><span class="unit">%</span></div></div><input type="range" min="0" max="100" step="0.1" value="40" aria-label="MAD percent"><div class="limits"><span>0%</span><span>100%</span></div></div>
+   <div class="parameter" data-key="madp"><div class="paramhead"><div><div class="paramtitle">MADP</div><div class="paramdesc">Management Allowed Depletion Point</div></div><div class="value"><span class="reading">25</span><span class="unit">%</span></div></div><input type="range" min="0" max="100" step="0.1" value="25" aria-label="MADP percent"><div class="limits"><span>0%</span><span>100%</span></div></div>
    <div class="parameter" data-key="fc"><div class="paramhead"><div><div class="paramtitle">Field Capacity (FC)</div><div class="paramdesc">Volumetric water content after drainage</div></div><div class="value"><span class="reading">35</span><span class="unit">%</span></div></div><input type="range" min="0" max="100" step="0.1" value="35" aria-label="Field Capacity percent"><div class="limits"><span>0%</span><span>100%</span></div></div>
    <div class="parameter" data-key="pwp"><div class="paramhead"><div><div class="paramtitle">Wilting Point (PWP)</div><div class="paramdesc">Permanent wilting water content</div></div><div class="value"><span class="reading">15</span><span class="unit">%</span></div></div><input type="range" min="0" max="100" step="0.1" value="15" aria-label="Permanent Wilting Point percent"><div class="limits"><span>0%</span><span>100%</span></div></div>
    <div class="parameter" data-key="sat"><div class="paramhead"><div><div class="paramtitle">Saturation Point (SAT)</div><div class="paramdesc">Water content when soil pores are saturated</div></div><div class="value"><span class="reading">50</span><span class="unit">%</span></div></div><input type="range" min="0" max="100" step="0.1" value="50" aria-label="Saturation Point percent"><div class="limits"><span>0%</span><span>100%</span></div></div>
@@ -47,7 +47,7 @@
 <script>
 (function(){
  'use strict';
- /* Bind in this order: V11 MAD, V12 FC, V10 PWP, V13 SAT, V2 health,
+ /* Bind in this order: V11 MADP, V12 FC, V10 PWP, V13 SAT, V2 health,
     V14 Apply, V15 status, V16 preset, V7 node, V8 description, V9 plant name,
     optional V19 node catalog at index 11 for cross-device navigation.
     Threshold streams use fractions 0–1; this UI displays percentages.
@@ -59,10 +59,10 @@
  const DASHBOARD_ORG_ID=1181191; // Public BTL organization route, used if device info is unavailable.
  const CATALOG_INDEX=11;
  const DEFAULT_DESCRIPTION='Monitor soil moisture and adjust irrigation settings for this plant.';
- const DEMO={nodeId:'DEMO_NODE',name:'Demo plant',mad:40,fc:35,pwp:15,sat:50};
- const KEYS=['mad','fc','pwp','sat'];
+ const DEMO={nodeId:'DEMO_NODE',name:'Demo plant',madp:25,fc:35,pwp:15,sat:50};
+ const KEYS=['madp','fc','pwp','sat'];
  // Widget positions, NOT virtual pins. See README.md for the binding table.
- const INDEX={mad:0,fc:1,pwp:2,sat:3,health:4,apply:5,status:6,preset:7,node:8,description:9,name:10};
+ const INDEX={madp:0,fc:1,pwp:2,sat:3,health:4,apply:5,status:6,preset:7,node:8,description:9,name:10};
  const $=s=>document.querySelector(s);
  const bridge=typeof BlynkBridge==='function'?new BlynkBridge({logEnabled:false,isOnErrorEnabled:true}):null;
  const LIVE=!!(bridge&&bridge.isBridgeAvailable());
@@ -73,7 +73,7 @@
  const pushed=new Set();
  function message(text,error=false){$('#message').textContent=text;$('#message').classList.toggle('error',error)}
  function number(raw){return (typeof raw==='number'||(typeof raw==='string'&&raw.trim()!==''))?Number(raw):NaN}
- function valid(x){return KEYS.every(k=>Number.isFinite(x[k]))&&x.mad>0&&x.mad<100&&x.pwp>=0&&x.pwp<x.fc&&x.fc<x.sat&&x.sat<=100}
+ function valid(x){return KEYS.every(k=>Number.isFinite(x[k]))&&x.pwp>=0&&x.pwp<x.madp&&x.madp<x.fc&&x.fc<x.sat&&x.sat<=100}
  function dirty(){return draft.name!==saved.name||KEYS.some(k=>!Object.is(draft[k],saved[k]))}
  function setupIssue(){
   if(!LIVE)return '';
@@ -130,7 +130,7 @@
   $('#configState').textContent=pending?'Pending':dirty()?'Modified':LIVE?'Loaded':'Demo';
   $('#applyBtn').disabled=!!pending||!initialized||!dirty()||!valid(draft)||!validName(draft.name)||(LIVE&&!ready());
   const issue=setupIssue();
-  $('#setupMessage').textContent=!initialized?'Loading device data; slider edits stay local.':issue||(!valid(draft)?'Set all four values: 0 < MAD < 100 and 0 ≤ PWP < FC < SAT ≤ 100%.':'Slider edits stay local until you click Apply.');
+  $('#setupMessage').textContent=!initialized?'Loading device data; slider edits stay local.':issue||(!valid(draft)?'Set all four values: 0 ≤ PWP < MADP < FC < SAT ≤ 100%.':'Slider edits stay local until you click Apply.');
   $('#setupMessage').classList.toggle('error',!!issue);
   $('#resetBtn').disabled=!!pending||!initialized;
   $('#profileSelect').disabled=!!pending||dirty();$('#openProfile').disabled=!!pending||dirty();
@@ -175,7 +175,7 @@
  async function apply(){
   if(pending||!initialized||!dirty()||(LIVE&&!ready()))return;
   if(!validName(draft.name)){message('Enter a plant name: 1–128 printable characters.',true);return}
-  if(!valid(draft)){message('Require 0 < MAD < 100 and 0 ≤ PWP < FC < SAT ≤ 100%.',true);return}
+  if(!valid(draft)){message('Require 0 ≤ PWP < MADP < FC < SAT ≤ 100%.',true);return}
   if(!LIVE){saved={...draft};message('Demo configuration saved locally.');render();return}
   const operation={deadline:Date.now()+35000,error:null,nodeId},submitted={...draft};pending=operation;render();
   try{

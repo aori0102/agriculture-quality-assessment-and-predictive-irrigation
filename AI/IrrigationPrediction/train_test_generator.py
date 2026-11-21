@@ -1,5 +1,9 @@
 import argparse
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from edge_logging import get_logger
+logger = get_logger("Dataset")
 
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -74,8 +78,8 @@ def generate_original_datasets():
     train_data.to_csv("datasets/train_data.csv", index=False)
     test_data.to_csv("datasets/test_data.csv", index=False)
     
-    print(f"Train data shape: {train_data.shape}")
-    print(f"Test data shape: {test_data.shape}")
+    logger.info(f"Train data shape: {train_data.shape}")
+    logger.info(f"Test data shape: {test_data.shape}")
 
 
 def generate_retrain_datasets(edge_log: Path, base_train: Path, output_dir: Path,
@@ -121,7 +125,7 @@ def generate_retrain_datasets(edge_log: Path, base_train: Path, output_dir: Path
     train = pd.concat([base, edge_train], ignore_index=True)
     train.to_csv(output_dir / "train_data.csv", index=False)
     edge_test.to_csv(output_dir / "test_data.csv", index=False)
-    print(f"Prepared {len(edge_train)} Edge train rows and {len(edge_test)} Edge test rows.")
+    logger.info(f"Prepared {len(edge_train)} Edge train rows and {len(edge_test)} Edge test rows.")
 
 
 def main() -> None:

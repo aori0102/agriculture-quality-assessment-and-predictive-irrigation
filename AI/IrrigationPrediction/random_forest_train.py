@@ -2,6 +2,10 @@
 
 import argparse
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from edge_logging import get_logger
+logger = get_logger("Train")
 import matplotlib.pyplot as plt
 import joblib
 import pandas as pd
@@ -104,18 +108,16 @@ def report_test_results(test: pd.DataFrame, predictions) -> None:
 
     for name, rows in groups:
         if rows.empty:
-            print(f"{name}: no rows")
+            logger.info(f"{name}: no rows")
             continue
 
         mae = mean_absolute_error(rows[TARGET], rows["prediction"])
         persistence_mae = mean_absolute_error(
             rows[TARGET], rows[fc.SOIL_MOISTURE]
         )
-        print(
-            f"{name} ({len(rows):,} rows): "
+        logger.info(f"{name} ({len(rows):,} rows): "
             f"RF MAE {mae:.3f} pp | "
-            f"persistence MAE {persistence_mae:.3f} pp"
-        )
+            f"persistence MAE {persistence_mae:.3f} pp")
 
 
 def main() -> None:
@@ -156,8 +158,8 @@ def main() -> None:
         ),
     ])
 
-    print(f"Train: {len(train):,} rows | Test: {len(test):,} rows")
-    print(f"Features: {', '.join(features)}")
+    logger.info(f"Train: {len(train):,} rows | Test: {len(test):,} rows")
+    logger.info(f"Features: {', '.join(features)}")
 
     model.fit(train[features], train[TARGET])
     predictions = model.predict(test[features])
@@ -172,14 +174,14 @@ def main() -> None:
     output = args.output or SCRIPT_DIR / "models" / default_name
     output.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(model, output)
-    print(f"Saved model: {output}")
+    logger.info(f"Saved model: {output}")
     
     if args.no_plot:
         return
 
     plot_path = output.with_name(f"{output.stem}_scatter.png")
     save_prediction_scatter(test, predictions, plot_path)
-    print(f"Saved scatter plot: {plot_path}")
+    logger.info(f"Saved scatter plot: {plot_path}")
 
 
 if __name__ == "__main__":

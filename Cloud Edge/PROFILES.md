@@ -46,7 +46,7 @@ Keep V7–V15 unchanged and create the agreed V16 selector before enabling profi
 | V8 | `node_description` | String | Editable description |
 | V9 | `plant_name` | String | Editable plant name |
 | V10 | `permanent_wilting_point` | Double 0–1 | PWP |
-| V11 | `management_allowed_depletion` | Double 0–1 | MAD fraction |
+| V11 | `management_allowed_depletion_point` | Double 0–1 | MADP moisture threshold |
 | V12 | `field_capacity` | Double 0–1 | FC |
 | V13 | `saturation_point` | Double 0–1 | SP |
 | V14 | `apply_profile` | Integer 0–1 | Momentary Apply button |
@@ -59,12 +59,12 @@ keeps the current values. Reload the same preset by switching to Custom and back
 Wait for preview completion before editing or pressing Apply. Preset thresholds
 must match the illustrative catalog within numerical round-trip tolerance.
 
-The Lettuce values (PWP .10, MAD .30, FC .22, SP .41) are illustrative and have
+The Lettuce values (PWP .10, MADP .184, FC .22, SP .41) are illustrative and have
 no established agronomic validity. No profile operation activates irrigation.
 Use one editor per device and do not edit during Apply: scalar Blynk streams
 cannot provide atomic multi-user form submissions.
 
-## Mapping, validation, and MAD readback
+## Mapping, validation, and direct MADP readback
 
 The adapter sends a complete validated snapshot through these existing arguments:
 
@@ -73,21 +73,19 @@ The adapter sends a complete validated snapshot through these existing arguments
 | `node_id` | `node_id` |
 | `plant_name` | `plant` |
 | PWP | `permanent_wilting_point` |
-| MAD | `management_allowable_depletion` |
+| MADP | `management_allowed_depletion_point` |
 | FC | `field_capacity` |
 | SP | `saturation_point` |
 
-V10–V13 remain fractions (0–1) in Blynk. The Cloud adapter converts PWP, FC,
-and SP to percentages (0–100) when writing Edge profiles, and converts stored
-Edge percentages back to fractions for Blynk. MAD remains a fraction; Edge uses
-it to calculate and persist **MADP** in percentage points. Cloud Edge
-reconstructs MAD from persisted values:
+V10–V13 are moisture fractions (0–1) in Blynk, displayed as percentages by
+the HTML widget. All four fields, including MADP, are multiplied by 100 when
+writing Edge profiles, then divided by 100 on readback. V11 is the direct
+management_allowed_depletion_point, not a depletion ratio. No MAD/MADP formula
+is used in synchronization or Apply validation.
 
 ```text
-MADP = FC - MAD * (FC - PWP)
-MAD = (FC - MADP) / (FC - PWP)
-0 < MAD < 1
 0 <= PWP < MADP < FC < SP <= 1
+Blynk V11 = Edge node_profile.madp / 100
 ```
 
 Readback validates finite numeric values, identity, and ordering before dividing.
@@ -106,8 +104,8 @@ return alone is not enough to claim success.
 
 Description, mode, and preset key are saved in
 `Cloud Edge/runtime/profile_metadata.json` (ignored by Git), with schema version
-1 and the acknowledged Edge values used solely to detect stale metadata. MAD
-and Edge revisions are not invented or stored separately. Metadata is saved by
+1 and the acknowledged Edge values used solely to detect stale metadata.
+Edge revisions are not invented or stored separately. Metadata is saved by
 flush/fsync and atomic file replacement after successful Edge readback.
 
 On reconnect, current Edge values are authoritative. Matching metadata completes
@@ -180,3 +178,12 @@ The example backend is in-memory only. Automated tests include the real AI proxy
 and operation manager against temporary storage and a supplied test configuration;
 no live AI storage, credentials, broker, or hardware are used. Live Blynk testing
 and actual AI runtime startup remain separate acceptance checks.
+
+## MADP migration
+
+V11 is now `management_allowed_depletion_point`, display name `MADP`, Double
+0–1. Keep its pin/id and widget index 0 unchanged. Stop the old Edge, update the
+template and HTML widget together, then restart Edge. Reconnect restores V11
+from the persisted Edge `madp`; old cloud MAD values must not be submitted as
+MADP. Existing Edge operation_log profiles need no data conversion. The Lettuce
+preset keeps the old effective MADP of 0.184. Refresh existing dashboard tabs.

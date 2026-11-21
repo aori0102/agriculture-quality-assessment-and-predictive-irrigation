@@ -146,6 +146,7 @@ class LifecycleTests(unittest.TestCase):
             if not source.exists():
                 source = AI / 'IrrigationPrediction' / name
             shutil.copyfile(source, self.root / name)
+        shutil.copyfile(AI / 'edge_logging.py', self.root.parent / 'edge_logging.py')
         shutil.copytree(AI / 'IrrigationPrediction/datasets', self.root / 'datasets')
         (self.models / 'irrigation_0.joblib').write_bytes(b'corrupt')
         model = m.load_or_train_initial_model(self.root, self.log)

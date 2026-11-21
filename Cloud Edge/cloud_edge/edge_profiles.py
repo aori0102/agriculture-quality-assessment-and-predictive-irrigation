@@ -65,8 +65,7 @@ class EdgeProfileBackend:
             raise ValueError('Saved Edge thresholds have ambiguous legacy fraction units.')
         if not 0 <= pwp < madp < fc < sp <= 100:
             raise ValueError('Saved Edge thresholds have invalid ordering.')
-        mad = (fc - madp) / (fc - pwp)
-        return PlantProfile(node_id, '', record.get('plant'), pwp / 100, mad, fc / 100, sp / 100)
+        return PlantProfile(node_id, '', record.get('plant'), pwp / 100, madp / 100, fc / 100, sp / 100)
 
     def _load_metadata(self) -> dict:
         try:
@@ -130,7 +129,7 @@ class EdgeProfileBackend:
                     self._update(
                         node_id=profile.node_id, plant=profile.plant_name,
                         permanent_wilting_point=profile.permanent_wilting_point * 100,
-                        management_allowable_depletion=profile.management_allowed_depletion,
+                        management_allowed_depletion_point=profile.management_allowed_depletion_point * 100,
                         field_capacity=profile.field_capacity * 100, saturation_point=profile.saturation_point * 100,
                     )
                 record = self._record(profile.node_id)

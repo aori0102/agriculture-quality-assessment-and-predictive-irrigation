@@ -7,7 +7,7 @@ from operation_log_manager import operation_log_manager
 def update_node_profile(
     node_id: str,
     permanent_wilting_point: float = None,
-    management_allowable_depletion: float = None,
+    management_allowed_depletion_point: float = None,
     field_capacity: float = None,
     saturation_point: float = None,
     plant: str = None):
@@ -19,7 +19,7 @@ def update_node_profile(
     operation_log_manager.log_node_profile(
         node_id=node_id,
         permanent_wilting_point=permanent_wilting_point,
-        management_allowable_depletion=management_allowable_depletion,
+        management_allowed_depletion_point=management_allowed_depletion_point,
         field_capacity=field_capacity,
         saturation_point=saturation_point,
         plant=plant

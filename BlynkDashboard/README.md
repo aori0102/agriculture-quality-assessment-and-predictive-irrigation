@@ -6,7 +6,7 @@ to Blynk's HTML Widget, choose **Specific datastreams**, and assign this order:
 
 | Widget index | Existing pin | Exact datastream name | Type / range |
 | --- | --- | --- | --- |
-| 0 | V11 | management_allowed_depletion | Double 0–1 |
+| 0 | V11 | management_allowed_depletion_point | Double 0–1 |
 | 1 | V12 | field_capacity | Double 0–1 |
 | 2 | V10 | permanent_wilting_point | Double 0–1 |
 | 3 | V13 | saturation_point | Double 0–1 |
@@ -22,7 +22,7 @@ to Blynk's HTML Widget, choose **Specific datastreams**, and assign this order:
 The widget positions are not virtual pin numbers. Do not use **All datastreams**.
 Show at least three decimal places on the threshold streams. Do not change the
 backend's 0–1 range to 0–100: the widget converts `.35` to `35%` for display.
-MAD must be strictly between 0 and 1; PWP < FC < SAT. Slider edits use steps of
+All thresholds are moisture values: 0 <= PWP < MADP < FC < SAT <= 1. Slider edits use steps of
 0.1 percentage point and preserve unedited fractional precision.
 
 ## Device mapping and navigation
@@ -138,3 +138,7 @@ References:
 
 - [Blynk HTML Widget](https://docs.blynk.io/en/blynk.console/widgets-console/html-widget)
 - [Official BlynkBridge reference](https://github.com/blynkkk/docs/blob/main/blynk.console/widgets-console/html-widget/html-widget-developer-guide.md)
+
+V11 is a direct MADP threshold, not MAD. The backend writes it to Edge madp
+without a depletion calculation. Upload the updated HTML and refresh open tabs
+when changing the Blynk V11 name/meaning.

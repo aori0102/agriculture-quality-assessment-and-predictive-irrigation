@@ -24,8 +24,7 @@ class EdgeProfileTests(unittest.TestCase):
             'node_id': kw['node_id'], 'plant': kw['plant'],
             'pwp': kw['permanent_wilting_point'], 'fc': kw['field_capacity'],
             'sp': kw['saturation_point'],
-            'madp': kw['field_capacity'] - kw['management_allowable_depletion'] * (
-                kw['field_capacity'] - kw['permanent_wilting_point']),
+            'madp': kw['management_allowed_depletion_point'],
         }
 
     def test_mapping_readback_and_restart_restore(self):
@@ -33,16 +32,16 @@ class EdgeProfileTests(unittest.TestCase):
         self.assertEqual(result.outcome, 'saved')
         self.assertIsNone(result.active.revision)
         self.writer.assert_called_once_with(node_id='one', plant='Illustrative Lettuce',
-            permanent_wilting_point=10, management_allowable_depletion=.3,
+            permanent_wilting_point=10, management_allowed_depletion_point=18.4,
             field_capacity=22, saturation_point=41)
         self.assertEqual(self.log['node_profile']['one']['fc'], 22)
         restored = EdgeProfileBackend(self.writer, lambda: self.log, self.path).get_active('one')
-        self.assertAlmostEqual(restored.profile.management_allowed_depletion, .3)
+        self.assertAlmostEqual(restored.profile.management_allowed_depletion_point, .184)
         self.assertEqual(restored.profile.node_description, 'Window')
         self.assertEqual(restored.profile.mode, 'preset')
         self.assertTrue(restored.metadata_complete)
         self.assertTrue(restored.saved_only)
-        self.assertNotIn('management_allowed_depletion', self.path.read_text())
+        self.assertNotIn('management_allowed_depletion_point', self.path.read_text())
 
     def test_existing_edge_percentage_defaults_decode_without_rewrite(self):
         self.log['node_profile']['one'].update(
@@ -50,7 +49,7 @@ class EdgeProfileTests(unittest.TestCase):
         active = self.backend.get_active('one')
         self.assertAlmostEqual(active.profile.permanent_wilting_point, .10)
         self.assertAlmostEqual(active.profile.field_capacity, .36)
-        self.assertAlmostEqual(active.profile.management_allowed_depletion, 16 / 26)
+        self.assertAlmostEqual(active.profile.management_allowed_depletion_point, .20)
         self.writer.assert_not_called()
 
     def test_identical_update_skips_edge_write_and_nodes_are_isolated(self):
@@ -134,7 +133,7 @@ class EdgeProfileTests(unittest.TestCase):
         from cloud_edge.errors import CloudError
         from tests.test_profile_sync import wait_until
         self.write(node_id='one', plant='Initial', permanent_wilting_point=10,
-                   management_allowable_depletion=.3, field_capacity=22, saturation_point=41)
+                   management_allowed_depletion_point=18.4, field_capacity=22, saturation_point=41)
         http = Mock()
         http.read_profile_snapshot.return_value = self.profile.to_datastreams()
         sync = ProfileSync(http, self.backend, node_id='one', retry_interval=.01)
@@ -189,7 +188,7 @@ class RealEdgeContractTests(unittest.TestCase):
                 restarted = manager_module.OperationLogManager()
             restarted.log_file_path = manager.log_file_path
             restored = EdgeProfileBackend(proxy.update_node_profile, restarted.load_log, metadata).get_active('one')
-            self.assertAlmostEqual(restored.profile.management_allowed_depletion, .3)
+            self.assertAlmostEqual(restored.profile.management_allowed_depletion_point, .184)
             self.assertEqual(restored.profile.node_description, 'Temporary test')
             self.assertEqual(restored.profile.mode, 'preset')
             self.assertNotIn('mad', restarted.load_log()['node_profile']['one'])
