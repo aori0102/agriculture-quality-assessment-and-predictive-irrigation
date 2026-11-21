@@ -1,3 +1,6 @@
+from edge_logging import get_logger
+logger = get_logger("CLOUD")
+
 """Bounded asynchronous uploads and validated device pump confirmations."""
 from datetime import datetime, timezone
 import json
@@ -31,7 +34,7 @@ class CloudReporter:
             self.queue.put_nowait((method, node_id, values))
             return True
         except Full:
-            print("Cloud upload queue full; update dropped")
+            logger.warning("Cloud upload queue full; update dropped")
             return False
 
     def _run(self):
@@ -46,7 +49,7 @@ class CloudReporter:
                     getattr(client, method)(node_id=node_id, **values)
             except Exception as error:
                 # Do not log transport exception text, which may contain credentials.
-                print(f"Cloud upload failed: {type(error).__name__}")
+                logger.error(f"Cloud upload failed: {type(error).__name__}")
             finally:
                 self.queue.task_done()
 
@@ -82,6 +85,7 @@ class CloudReporter:
                     if previous is not None and sent <= previous["sent_at"]:
                         return False
                     self.last_capture_event[node_id] = {"sent_at": sent, "sample_seq": sequence}
+                logger.info("CAPTURE node=%s seq=%s | node confirmed capture/upload queued", node_id, sequence)
                 return True
             with self.lock:
                 previous = self.last_pump_event.get(node_id)
@@ -90,6 +94,7 @@ class CloudReporter:
                 if not self.submit("report_pump_status", node_id=node_id, is_on=states[event]):
                     return False
                 self.last_pump_event[node_id] = sent
+            logger.info("PUMP node=%s state=%s | node event accepted", node_id, "ON" if states[event] else "OFF")
             return True
         except (ValueError, TypeError, UnicodeDecodeError):
             return False

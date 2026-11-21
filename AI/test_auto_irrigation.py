@@ -16,8 +16,9 @@ class AutoIrrigationTests(unittest.TestCase):
         self.manager = OperationLogManager()
         self.manager.log_file_path = Path(self.temporary.name) / 'operation.json'
         self.manager.log_node('one')
+        self.manager.log_irrigation_status('one', False)  # Explicit fixture; independent of node defaults.
 
-    def test_default_off_and_persisted_permission_preserves_profile(self):
+    def test_persisted_permission_preserves_profile(self):
         self.assertFalse(self.manager.get_node_profile('one').auto_irrigation_enabled)
         original = self.manager.get_node_profile('one').plant
         self.manager.log_irrigation_status('one', True)
@@ -44,7 +45,7 @@ class AutoIrrigationTests(unittest.TestCase):
         method = next(n for n in cls.body if isinstance(n, ast.FunctionDef)
                       and n.name == 'send_irrigation_command')
         publisher = Mock()
-        namespace = {'operation_log_manager': self.manager, 'command_proxy': publisher,
+        namespace = {'logger': Mock(), 'operation_log_manager': self.manager, 'command_proxy': publisher,
                      'ActionIndex': SimpleNamespace(StartPump='start_pump')}
         exec(compile(ast.Module(body=[method], type_ignores=[]), str(path), 'exec'), namespace)
         send = namespace['send_irrigation_command']

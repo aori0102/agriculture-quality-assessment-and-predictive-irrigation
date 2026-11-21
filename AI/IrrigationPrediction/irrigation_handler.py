@@ -1,3 +1,6 @@
+from edge_logging import get_logger
+logger = get_logger("IRRIGATION")
+
 from cloud_reporter import cloud_reporter
 from .model_retrainer import load_or_train_initial_model
 import pandas as pd
@@ -135,7 +138,7 @@ class IrrigationHandler:
         sampling = self.current_unsampled_nodes.copy()
         for node_id in sampling:
             if self.handle_irrigation(node_id):
-                print(f"Node {node_id} successfully sampled!")
+                logger.info(f"Node {node_id} successfully sampled!")
                 self.current_unsampled_nodes.remove(node_id)
                 
 
@@ -153,7 +156,7 @@ class IrrigationHandler:
             bool: True if the irrigation was handled successfully, False otherwise.
         """
         
-        print(f"Handling irrigation for node: {node_id}")
+        logger.debug(f"Handling irrigation for node: {node_id}")
         
         if node_id is None:
             return False
@@ -169,7 +172,7 @@ class IrrigationHandler:
             return True
         data = irrigation_data_handler.get_irrigation_data(node_id=node_id, timestamp=target_sample_time)
         if data is None:
-            print(f"Cannot fetch irrigation data: {irrigation_data_handler.last_fetch_error}")
+            logger.debug(f"Cannot fetch irrigation data: {irrigation_data_handler.last_fetch_error}")
             return False
 
         # Unmatched timestamp
@@ -192,6 +195,8 @@ class IrrigationHandler:
             predicted_moisture_pct=float(next_moisture_without_irrigation),
         )
         plant_profile = operation_log_manager.get_node_profile(node_id)
+        logger.info("PREDICT node=%s soil=%.1f%% next_without_irrigation=%.1f%%",
+                    node_id, current_soil_moisture, float(next_moisture_without_irrigation))
 
         skip_irrigation = (
             current_soil_moisture > plant_profile.fc or
@@ -249,12 +254,12 @@ class IrrigationHandler:
         if profile is None or profile.auto_irrigation_enabled is not True:
             return False
         if irrigation_minutes <= 0:
-            print(f"Invalid irrigation duration: {irrigation_minutes} minutes. Command not sent.")
+            logger.warning(f"Invalid irrigation duration: {irrigation_minutes} minutes. Command not sent.")
             return False
 
         duration_ms = int(irrigation_minutes * 60 * 1000)
         if duration_ms > self.max_duration_ms:
-            print(f"Requested irrigation duration {duration_ms} ms exceeds maximum allowed {self.max_duration_ms} ms. Command not sent.")
+            logger.info(f"Requested irrigation duration {duration_ms} ms exceeds maximum allowed {self.max_duration_ms} ms. Command not sent.")
             return False
 
         return command_proxy.send_command(

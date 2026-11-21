@@ -1,3 +1,6 @@
+from edge_logging import get_logger
+logger = get_logger("DATA")
+
 import pandas as pd
 from pathlib import Path
 from datetime import datetime, timezone
@@ -42,7 +45,7 @@ class IrrigationDataHandler:
             self.data_frame = pd.DataFrame(columns=LOG_FIELDS)
             self.save_data()
         
-        print("Initialized irrigation data log.")
+        logger.info("Initialized irrigation data log.")
 
     @synchronized
     def save_data(self):

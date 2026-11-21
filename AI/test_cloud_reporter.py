@@ -87,6 +87,8 @@ class ReporterTests(unittest.TestCase):
 
 class WiringTests(unittest.TestCase):
     def load_functions(self, name, namespace):
+        from edge_logging import get_logger
+        namespace.setdefault("logger", get_logger("TEST"))
         import ast
         source = AI_ROOT / name
         if not source.exists():
