@@ -4,10 +4,16 @@
 #include <Arduino.h>
 #include <espMqttClient.h>
 #include <functional>
+#include <deque>
+#include <mutex>
 
 class MQTTClient {
 private:
     espMqttClient m_client;
+    std::mutex m_queueMutex;
+    std::deque<std::pair<String, String>> m_controlQueue;
+    std::function<void(const String&, const String&)> m_controlCallback;
+    String m_configTopic, m_heartbeatTopic, m_ackTopic;
 
     String m_edgeId;
     String m_host;
@@ -34,7 +40,7 @@ private:
 
     static constexpr uint32_t RECONNECT_INTERVAL = 5000;
 
-    static constexpr size_t MAX_COMMAND_SIZE = 1024;
+    static constexpr size_t MAX_COMMAND_SIZE = 2048;
 
     static constexpr uint32_t MAX_PUMP_DURATION_MS = 60000;
 
@@ -66,6 +72,8 @@ private:
     );
 
 public:
+    void setControlCallback(std::function<void(const String&, const String&)> fn) { m_controlCallback = fn; }
+    bool publishControlEvent(const String& value) { return m_client.connected() && m_client.publish(m_eventTopic.c_str(), 1, false, value.c_str()) != 0; }
     void begin(
         const String& edgeId,
         const String& deviceId,

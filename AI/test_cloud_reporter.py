@@ -123,7 +123,8 @@ class WiringTests(unittest.TestCase):
             ThreadPoolExecutor=Mock(), ModelRetrainer=Mock(),
             operation_log_manager=Mock(), irrigation_handler=Mock(),
             irrigation_data_handler=Mock(), command_proxy=Mock(), capture_handler=Mock(),
-            telemetry_handler=Mock(), pump_coordinator=Mock())
+            telemetry_handler=Mock(), pump_coordinator=Mock(),
+            node_fallback=SimpleNamespace(NodeFallback=Mock(return_value=SimpleNamespace(receive=lambda *args: False)), active_fallback=None))
         self.load_functions('app.py', namespace)
         with patch.object(mqtt, 'Client', return_value=client):
             namespace['main']()

@@ -237,3 +237,6 @@ platformio.ini
 
 # VS Code
 .vscode/
+# Per-node fallback runtime audit and configuration versions
+AI/fallback_state.json
+AI/fallback_state.json.tmp

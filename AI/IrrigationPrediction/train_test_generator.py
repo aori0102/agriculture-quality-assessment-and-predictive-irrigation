@@ -95,6 +95,14 @@ def generate_retrain_datasets(edge_log: Path, base_train: Path, output_dir: Path
     data[fc.TIMESTAMP] = timestamps.loc[data.index]
     data = data.dropna(subset=[fc.NODE_ID]).sort_values(fc.TIMESTAMP, kind="stable")
     data = data.drop_duplicates([fc.NODE_ID, fc.TIMESTAMP], keep="last")
+    # Offline actuation audit is authoritative; exclude uncertain history rather than treating it as zero.
+    import json
+    fallback_state = edge_log.resolve().parents[1] / "fallback_state.json"
+    if fallback_state.exists():
+        cutoffs = json.loads(fallback_state.read_text(encoding="utf-8"))["quarantine_until"]
+        for node, until in cutoffs.items():
+            data = data.loc[~((data[fc.NODE_ID] == node) & (data[fc.TIMESTAMP] <= pd.Timestamp(until)))].copy()
+
     measurements = [fc.SOIL_MOISTURE, fc.WEATHER_TEMPERATURE,
                     fc.WEATHER_HUMIDITY, fc.IRRIGATION_DURATION_MINUTES]
     for column in measurements:

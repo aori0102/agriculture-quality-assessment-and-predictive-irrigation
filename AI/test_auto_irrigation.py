@@ -45,26 +45,27 @@ class AutoIrrigationTests(unittest.TestCase):
         method = next(n for n in cls.body if isinstance(n, ast.FunctionDef)
                       and n.name == 'send_irrigation_command')
         publisher = Mock()
-        namespace = {'logger': Mock(), 'operation_log_manager': self.manager, 'command_proxy': publisher,
+        namespace = {'logger': Mock(), 'operation_log_manager': self.manager, 'pump_coordinator': publisher,
+                     'prediction_allowed': lambda node: True,
                      'ActionIndex': SimpleNamespace(StartPump='start_pump')}
         exec(compile(ast.Module(body=[method], type_ignores=[]), str(path), 'exec'), namespace)
         send = namespace['send_irrigation_command']
         handler = SimpleNamespace(max_duration_ms=60_000)
         self.assertFalse(send(handler, 'one', .5))
-        publisher.send_command.assert_not_called()
+        publisher.request_automatic_start.assert_not_called()
         self.manager.log_irrigation_status('one', True)
-        publisher.send_command.return_value = True
+        publisher.request_automatic_start.return_value = True
         self.assertTrue(send(handler, 'one', .5))
-        self.assertEqual(publisher.send_command.call_args.kwargs['duration_ms'], 30_000)
+        self.assertEqual(publisher.request_automatic_start.call_args.args, ('one', 30_000))
         publisher.reset_mock()
         # OFF after inference must block the final send, without a stop command.
         self.manager.log_irrigation_status('one', False)
         self.assertFalse(send(handler, 'one', .5))
-        publisher.send_command.assert_not_called()
+        publisher.request_automatic_start.assert_not_called()
         self.manager.log_irrigation_status('one', True)
         self.assertFalse(send(handler, 'one', 2))
-        publisher.send_command.assert_not_called()
-        publisher.send_command.return_value = False
+        publisher.request_automatic_start.assert_not_called()
+        publisher.request_automatic_start.return_value = False
         self.assertFalse(send(handler, 'one', .5))
 
 

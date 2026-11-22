@@ -11,6 +11,7 @@ from action_index import ActionIndex
 from command_proxy import command_proxy
 from operation_log_manager import operation_log_manager
 from cloud_reporter import cloud_reporter
+from node_fallback import control_ready
 
 
 class PumpCoordinator:
@@ -35,7 +36,7 @@ class PumpCoordinator:
         record = operation_log_manager.load_log()["node_profile"].get(node_id)
         if not isinstance(record, dict):
             return False
-        value = record.get("irrigation_status", True)
+        value = record.get("auto_irrigation_enabled", record.get("irrigation_status", False))
         return value is True
 
     def _mode(self, node_id, enabled):
@@ -48,6 +49,9 @@ class PumpCoordinator:
         cloud_reporter.submit("report_pump_detail", node_id=node_id, detail=value)
 
     def _send(self, node_id, action, duration_ms=0):
+        if action is ActionIndex.StartPump and not control_ready(node_id):
+            self._detail(node_id, "unknown: awaiting fallback configuration and audit reconciliation")
+            return False
         command_id = uuid4().hex
         if not command_proxy.send_command(node_id, action, ttl_ms=self.ttl_ms,
                                           duration_ms=duration_ms, command_id=command_id):

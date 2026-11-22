@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from time import monotonic
 from operation_log_manager import operation_log_manager
 from pump_control import pump_coordinator
+from node_fallback import prediction_allowed
 
 class IrrigationHandler:
     def __init__(self):
@@ -160,6 +161,8 @@ class IrrigationHandler:
         if node_id is None:
             return False
         
+        if not prediction_allowed(node_id):
+            return False
         profile = operation_log_manager.get_node_profile(node_id)
         if profile is None or profile.auto_irrigation_enabled is not True:
             return False
@@ -229,16 +232,8 @@ class IrrigationHandler:
                 return False
             return telemetry_handler.record_irrigation_data(
                 target_duration, node_id=node_id, timestamp=target_sample_time)
-        # The device accepts one bounded run. A later sample may authorize another.
-        run_duration_ms = min(int(target_duration * 60000), pump_coordinator.max_duration_ms)
-        if not pump_coordinator.request_automatic_start(node_id, run_duration_ms):
-            telemetry_handler.record_irrigation_data(0, node_id=node_id, timestamp=target_sample_time)
-            return True
-        if not telemetry_handler.record_irrigation_data(run_duration_ms / 60000, node_id=node_id, timestamp=target_sample_time):
-            return False
-        return True
-    
-    
+
+
     def configure_command_publisher(self, client: mqtt.Client, config: ConfigParser) -> None:
         self.edge_id = config['edge']['edge_id'].strip()
         self.command_topic = config['mqtt']['command_topic']
@@ -257,6 +252,8 @@ class IrrigationHandler:
             node_id (str): The ID of the node to which the command will be sent.
             irrigation_minutes (int): The duration for which the pump should run, in minutes.
         """
+        if not prediction_allowed(node_id):
+            return False
         profile = operation_log_manager.get_node_profile(node_id)
         if profile is None or profile.auto_irrigation_enabled is not True:
             return False
@@ -269,13 +266,8 @@ class IrrigationHandler:
             logger.info(f"Requested irrigation duration {duration_ms} ms exceeds maximum allowed {self.max_duration_ms} ms. Command not sent.")
             return False
 
-        return command_proxy.send_command(
-            node_id=node_id,
-            action=ActionIndex.StartPump,
-            ttl_ms=300_000,
-            duration_ms=duration_ms
-        )
-        pump_coordinator.request_automatic_start(node_id, duration_ms)
+        return pump_coordinator.request_automatic_start(node_id, duration_ms)
+
 
 
 irrigation_handler = IrrigationHandler()

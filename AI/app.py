@@ -17,6 +17,7 @@ from IrrigationPrediction.model_retrainer import ModelRetrainer
 from IrrigationPrediction.irrigation_data_handler import irrigation_data_handler
 from operation_log_manager import operation_log_manager
 from pump_control import pump_coordinator
+import node_fallback
 
 CONFIG_FILE = "config.cfg"
 
@@ -132,6 +133,8 @@ def main():
     def on_event(client, userdata, message):
         if ready:
             node_id = strip_topic_to_node_id(message.topic, "events")
+            if node_fallback.active_fallback.receive(message, node_id):
+                return
             if not cloud_reporter.receive_pump_event(message, node_id):
                 logger.warning(f"Ignored invalid, expired or duplicate device event on {message.topic}")
 
@@ -156,6 +159,7 @@ def main():
         subscription_mid = None
         logger.warning("MQTT disconnected reason=%s | waiting to reconnect", reason_code)
         pump_coordinator.disconnected()
+        node_fallback.active_fallback.disconnected()
 
     def on_subscribe(client, userdata, mid, reason_codes, properties):
         nonlocal test_sent, ready, subscription_mid
@@ -189,6 +193,10 @@ def main():
     client.message_callback_add(event_filter, on_event)
     irrigation_handler.configure_command_publisher(client, cfg)
     command_proxy.configure(client, cfg)
+    node_fallback.active_fallback = node_fallback.NodeFallback(
+        client, edge_id, operation_log_manager,
+        cfg_path.parent / cfg.get("fallback", "policies_path", fallback="fallback_policies.json"),
+        cfg_path.parent / cfg.get("fallback", "state_path", fallback="fallback_state.json"))
 
     logger.info(f"Connecting to {host}:{port}...")
     need_connection = True
@@ -211,6 +219,7 @@ def main():
             if result != mqtt.MQTT_ERR_SUCCESS:
                 ready = False
                 pump_coordinator.disconnected()
+                node_fallback.active_fallback.disconnected()
                 subscription_mid = None
                 need_connection = True
                 sleep(1)
@@ -218,6 +227,7 @@ def main():
 
             if ready and client.is_connected():
                 pump_coordinator.tick()
+                node_fallback.active_fallback.tick()
                 if retrainer.tick(can_swap=image_future is None or image_future.done()):
                     continue
                 irrigation_handler.loop()

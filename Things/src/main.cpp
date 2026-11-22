@@ -21,6 +21,7 @@
 #include "Actuator/PowerButton.h"
 #include "Actuator/StatusLed.h"
 #include "Actuator/PumpController.h"
+#include "Actuator/NodeFallback.h"
 
 
 // =====================================================
@@ -40,6 +41,8 @@ PumpController pumpController(
 // =====================================================
 // CAMERA UART CONFIGURATION
 // =====================================================
+
+NodeFallback nodeFallback(pumpController);
 
 constexpr uint32_t CAMERA_UART_BAUD_RATE = 921600;
 
@@ -427,6 +430,7 @@ void handleTelemetry() {
     // ---------------------------------------------
 
     SensorData sensorData = sensorManager.readAll();
+    nodeFallback.sample(sensorData.soil.moisturePercent, sensorData.soil.isValid);
 
     // ---------------------------------------------
     // 2. Generate sample sequence.
@@ -669,12 +673,12 @@ void initializeMQTT() {
         Serial.println();
         Serial.println("[COMMAND] Starting water pump...");
 
-        const bool started = pumpController.start(durationMs);
+        const bool started = nodeFallback.start(durationMs);
         if (started) pumpController.takeStateChange();
         return started;
     });
     mqttClient.setStopPumpCallback([]() {
-        pumpController.stop();
+        nodeFallback.stop();
         pumpController.takeStateChange();
     });
     mqttClient.setPumpStateCallback([]() { return pumpController.isRunning(); });
@@ -683,6 +687,9 @@ void initializeMQTT() {
     // 3. Initialize MQTT.
     // ---------------------------------------------
 
+    nodeFallback.begin(config.edgeId, deviceIdentity.getNodeId());
+    nodeFallback.publish = [](const String& value) { return mqttClient.publishControlEvent(value); };
+    mqttClient.setControlCallback([](const String& topic, const String& value) { nodeFallback.receive(topic, value); });
     mqttClient.begin(
         config.edgeId,
         deviceIdentity.getNodeId(),
@@ -938,6 +945,7 @@ void loop() {
     // ---------------------------------------------
 
     mqttClient.loop();
+    nodeFallback.tick();
 
     statusLed.update(mqttClient.isConnected(), configPortal.isActive());
 
@@ -960,19 +968,6 @@ void loop() {
     handleCameraResponse();
 
     // ---------------------------------------------
-    // 9. Wait for MQTT connection.
-    // ---------------------------------------------
-
-    if (!mqttClient.isConnected()) {
-
-        delay(1);
-
-        return;
-    }
-
-    // ---------------------------------------------
-    // 10. Read sensors and publish telemetry.
-    // ---------------------------------------------
-
+    // Read sensors even when Wi-Fi, MQTT or Edge is unavailable.
     handleTelemetry();
 }
