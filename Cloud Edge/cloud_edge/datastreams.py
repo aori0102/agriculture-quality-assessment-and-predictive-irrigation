@@ -10,7 +10,7 @@ class BlynkPins:
     NODE_DESCRIPTION = "v8"
     PLANT_NAME = "v9"
     PERMANENT_WILTING_POINT = "v10"
-    MANAGEMENT_ALLOWED_DEPLETION = "v11"
+    MANAGEMENT_ALLOWED_DEPLETION_POINT = "v11"
     FIELD_CAPACITY = "v12"
     SATURATION_POINT = "v13"
     APPLY_PROFILE = "v14"
@@ -34,7 +34,7 @@ PROFILE_FIELDS = {
     BlynkPins.NODE_DESCRIPTION: "node_description",
     BlynkPins.PLANT_NAME: "plant_name",
     BlynkPins.PERMANENT_WILTING_POINT: "permanent_wilting_point",
-    BlynkPins.MANAGEMENT_ALLOWED_DEPLETION: "management_allowed_depletion",
+    BlynkPins.MANAGEMENT_ALLOWED_DEPLETION_POINT: "management_allowed_depletion_point",
     BlynkPins.FIELD_CAPACITY: "field_capacity",
     BlynkPins.SATURATION_POINT: "saturation_point",
 }

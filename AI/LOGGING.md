@@ -14,8 +14,9 @@ immediately by the component in brackets. Level names are not printed. On an
 interactive terminal, INFO is green, WARNING yellow, ERROR/CRITICAL red and
 DEBUG cyan. Redirected output stays plain text; set NO_COLOR to disable colors.
 Cloud Edge's existing logger messages use `[Cloud]` after AI initializes.
-Standalone CLI check/status output and external training subprocess/third-party
-library output retain their own format.
+Standalone CLI check/status and third-party library output retain their own
+format. Irrigation training and dataset-generation subprocesses use the same
+logger through [Train] and [Dataset], including when run directly.
 
 Default level is INFO. Repeated irrigation polling messages and full MQTT payloads
 are DEBUG. To show details in PowerShell before starting the Edge application:
@@ -35,3 +36,7 @@ PUMP means a validated node event was accepted, not a measured water-flow result
 Tests cover repeated initialization, formatting, line injection, event routing,
 telemetry acceptance, command policy and model lifecycle. Hardware/live broker
 behavior is not tested by these logging changes.
+
+Train/retrain scripts resolve edge_logging.py relative to the AI directory,
+independent of their working directory. Fatal script errors log in red and exit
+nonzero; traceback details are DEBUG. Training arguments and model behavior are unchanged.

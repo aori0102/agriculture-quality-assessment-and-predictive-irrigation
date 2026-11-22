@@ -149,32 +149,12 @@ class OperationLogManager:
             status.pop("last_retrain_period", None)
         self.save_log(log)
 
-    def calculate_madp(self, pwp: float, mad: float, fc: float) -> float:
-        """
-        Calculate the Management Allowed Depletion Point (MADP) based on the provided parameters.
-        
-        Args:
-            pwp (float): Permanent Wilting Point.
-            mad (float): Management Allowed Depletion.
-            fc (float): Field Capacity.
-        
-        Returns:
-            float: The calculated MADP value, or None if any parameter is missing.
-        """
-        if not all(isinstance(param, (int, float)) for param in [pwp, mad, fc]):
-            return None  # Return None if any parameter is missing or not a number
-
-        madp = fc - mad * (fc - pwp)
-        return madp
-
-
     @synchronized
     def log_node_profile(
         self,
         node_id: str,
         permanent_wilting_point: float = None,
         management_allowed_depletion_point: float = None,
-        management_allowable_depletion: float = None,
         field_capacity: float = None,
         saturation_point: float = None,
         plant: str = None):
@@ -183,14 +163,6 @@ class OperationLogManager:
         if node_id not in log['node_profile']:
             raise ValueError(f"Node ID {node_id} not found in log.")
         
-        # Calculate MADP if not present
-        if management_allowed_depletion_point is None:
-                management_allowed_depletion_point = self.calculate_madp(
-                    pwp=permanent_wilting_point,
-                    mad=management_allowable_depletion,
-                    fc=field_capacity
-                )
-
         updates = {
             "plant": plant,
             "pwp": permanent_wilting_point,

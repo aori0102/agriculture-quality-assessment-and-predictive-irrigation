@@ -35,6 +35,21 @@ class ClientTests(unittest.TestCase):
         self.client = CloudClient(self.config, node_id="node-1")
         self.addCleanup(self.client.close)
 
+    def test_log_event_uses_device_endpoint_and_validates_node(self):
+        self.client.log_event(node_id="node-1", code="soil_moisture_low", description="Soil 15%")
+        call = self.session.get.call_args
+        self.assertTrue(call.args[0].endswith("/external/api/logEvent"))
+        self.assertEqual(call.kwargs["params"]["code"], "soil_moisture_low")
+        self.assertEqual(call.kwargs["params"]["description"], "Soil 15%")
+        self.assertTrue(call.kwargs["verify"])
+        self.session.get.reset_mock()
+        with self.assertRaises(ValueError):
+            self.client.log_event(node_id="other", code="pump_started")
+        for code, description in (("bad&code", ""), ("", ""), ("valid", "x" * 301)):
+            with self.assertRaises(ValueError):
+                self.client.log_event(node_id="node-1", code=code, description=description)
+        self.session.get.assert_not_called()
+
     def test_snapshot_and_convenience_methods_have_identical_mappings(self):
         self.client.send_snapshot(
             node_id="node-1", soil_index_pct=42.5, temperature_c=28.5,

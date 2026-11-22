@@ -11,6 +11,7 @@ from action_index import ActionIndex
 from command_proxy import command_proxy
 from operation_log_manager import operation_log_manager
 from cloud_reporter import cloud_reporter
+from node_fallback import control_ready
 
 
 class PumpCoordinator:
@@ -30,12 +31,13 @@ class PumpCoordinator:
         self.last_sequence = {}
         self.last_event_at = {}
         self.restore_auto = set()
+        self.timeline_state = {}
 
     def auto_enabled(self, node_id):
         record = operation_log_manager.load_log()["node_profile"].get(node_id)
         if not isinstance(record, dict):
             return False
-        value = record.get("irrigation_status", True)
+        value = record.get("auto_irrigation_enabled", record.get("irrigation_status", False))
         return value is True
 
     def _mode(self, node_id, enabled):
@@ -48,6 +50,9 @@ class PumpCoordinator:
         cloud_reporter.submit("report_pump_detail", node_id=node_id, detail=value)
 
     def _send(self, node_id, action, duration_ms=0):
+        if action is ActionIndex.StartPump and not control_ready(node_id):
+            self._detail(node_id, "unknown: awaiting fallback configuration and audit reconciliation")
+            return False
         command_id = uuid4().hex
         if not command_proxy.send_command(node_id, action, ttl_ms=self.ttl_ms,
                                           duration_ms=duration_ms, command_id=command_id):
@@ -137,6 +142,8 @@ class PumpCoordinator:
                     self.confirmed.pop(node_id, None)
                     self.restore_auto.discard(node_id)
                     self._detail(node_id, "unknown: device acknowledgement timed out")
+                    cloud_reporter.emit_event(node_id=node_id, code="pump_ack_timeout",
+                                              description=f"Node {node_id}: pump command acknowledgement timed out; state unknown.")
             for node_id, observed_at in tuple(self.last_event_at.items()):
                 if monotonic() - observed_at >= 15:
                     self.last_event_at.pop(node_id)
@@ -166,6 +173,13 @@ class PumpCoordinator:
                 return
             self.last_event_at[node_id] = monotonic()
             self.confirmed[node_id] = state
+            previous_state = self.timeline_state.get(node_id)
+            # Firmware repeats state every five seconds; only log transitions.
+            # Initial OFF is a baseline, initial ON is useful ongoing activity.
+            if state != previous_state and (previous_state is not None or state):
+                cloud_reporter.emit_event(node_id=node_id, code=data["event"],
+                                          description=f"Node {node_id}: pump confirmed {'ON' if state else 'OFF'}.")
+            self.timeline_state[node_id] = state
             cloud_reporter.submit("report_pump_status", node_id=node_id, is_on=state)
             self._detail(node_id, "confirmed: " + ("on" if state else "off"))
             if not state and node_id in self.restore_auto:

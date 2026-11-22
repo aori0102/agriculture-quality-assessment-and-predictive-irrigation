@@ -226,6 +226,9 @@ void MQTTClient::begin(
     m_telemetryTopic = baseTopic + "/telemetry";
     m_imageTopic = baseTopic + "/image";
     m_commandTopic = baseTopic + "/command";
+    m_configTopic = baseTopic + "/config";
+    m_heartbeatTopic = baseTopic + "/heartbeat";
+    m_ackTopic = baseTopic + "/fallback_ack";
     m_eventTopic = baseTopic + "/events";
     m_bootId = String(esp_random(), HEX) + String(esp_random(), HEX);
 
@@ -292,7 +295,7 @@ void MQTTClient::begin(
         size_t index,
         size_t total
     ) {
-        (void)properties;
+        if (properties.retain) return;
 
         handleIncomingMessage(
             topic,
@@ -392,6 +395,9 @@ void MQTTClient::subscribeCommandTopic() {
     Serial.print("[MQTT] Command topic: ");
     Serial.println(m_commandTopic);
 
+    m_client.subscribe(m_configTopic.c_str(), 1);
+    m_client.subscribe(m_heartbeatTopic.c_str(), 0);
+    m_client.subscribe(m_ackTopic.c_str(), 1);
     uint16_t packetId = m_client.subscribe(
         m_commandTopic.c_str(),
         1
@@ -421,8 +427,7 @@ void MQTTClient::handleIncomingMessage(
         return;
     }
 
-    // Only process our command topic.
-    if (m_commandTopic != topic) {
+    if (m_commandTopic != topic && m_configTopic != topic && m_heartbeatTopic != topic && m_ackTopic != topic) {
         return;
     }
 
@@ -452,6 +457,12 @@ void MQTTClient::handleIncomingMessage(
     }
 
     // Append received chunk.
+    if (index != m_incomingPayload.length() || len > total || index > total - len) {
+        m_incomingPayload = "";
+        m_incomingTopic = "";
+        m_expectedPayloadSize = 0;
+        return;
+    }
     m_incomingPayload.concat(
         reinterpret_cast<const char*>(payload),
         len
@@ -480,7 +491,10 @@ void MQTTClient::handleIncomingMessage(
     Serial.println("[MQTT] Payload:");
     Serial.println(m_incomingPayload);
 
-    processCommand(m_incomingPayload);
+    {
+        std::lock_guard<std::mutex> lock(m_queueMutex);
+        if (m_controlQueue.size() < 32) m_controlQueue.emplace_back(m_incomingTopic, m_incomingPayload);
+    }
 
     // Clear buffer after processing.
     m_incomingPayload = "";
@@ -726,6 +740,12 @@ void MQTTClient::processCommand(
 // =====================================================
 
 void MQTTClient::loop() {
+    std::deque<std::pair<String, String>> pending;
+    { std::lock_guard<std::mutex> lock(m_queueMutex); pending.swap(m_controlQueue); }
+    for (const auto& message: pending) {
+        if (message.first == m_commandTopic) processCommand(message.second);
+        else if (m_controlCallback) m_controlCallback(message.first, message.second);
+    }
     if (!m_started || !WiFi.isConnected()) {
         return;
     }

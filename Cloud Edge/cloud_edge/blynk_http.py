@@ -64,6 +64,16 @@ class BlynkHTTP:
                 return
             self._request("batch/update", params)
 
+    def log_event(self, *, code: str, description: str = "") -> None:
+        """Log a preconfigured template Event through the Device HTTPS API."""
+        if (not isinstance(code, str) or not 1 <= len(code) <= 50
+                or any(not (c.isascii() and (c.isalnum() or c in "_ ")) for c in code)):
+            raise ValueError("Invalid Blynk event code.")
+        if not isinstance(description, str) or len(description) > 300:
+            raise ValueError("Event description must contain at most 300 characters.")
+        with self._lock:
+            self._request("logEvent", {"code": code, "description": description})
+
     def read_profile_snapshot(self) -> dict:
         """Fetch all editable profile streams in one HTTPS request."""
         with self._lock:

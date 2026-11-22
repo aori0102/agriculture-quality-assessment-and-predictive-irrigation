@@ -74,7 +74,7 @@ their values by virtual pin. Incoming pump requests use the exact MQTT topic
 | V8 | `node_description` | String | Edit to `SIMULATED: greenhouse A`, Apply, verify backend |
 | V9 | `plant_name` | String | Edit to `Test Lettuce`, Apply, verify backend |
 | V10 | `permanent_wilting_point` | Double | Custom 0.12; preset 0.10 |
-| V11 | `management_allowed_depletion` | Double | Custom 0.35; preset 0.30 |
+| V11 | `management_allowed_depletion_point` | Double | Custom 0.18; preset 0.184 |
 | V12 | `field_capacity` | Double | Custom 0.26; preset 0.22 |
 | V13 | `saturation_point` | Double | Custom 0.45; preset 0.41 |
 | V14 | `apply_profile` | Integer 0/1 | Apply updates backend and button returns to 0 |

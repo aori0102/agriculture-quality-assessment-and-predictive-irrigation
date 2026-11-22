@@ -6,12 +6,12 @@ from cloud_edge.profiles import PlantProfile, illustrative_preset, validate_snap
 
 def draft(node_id="node-1", **changes):
     values = dict(v7=node_id, v8="Window", v9="Lettuce", v10=0.10,
-                  v11=0.30, v12=0.22, v13=0.41, v16=0)
+                  v11=0.184, v12=0.22, v13=0.41, v16=0)
     return values | changes
 
 
 class ProfileTests(unittest.TestCase):
-    def test_fractional_profile_and_derived_madp(self):
+    def test_fractional_profile_and_direct_madp(self):
         profile = validate_snapshot(draft(), node_id="node-1")
         self.assertAlmostEqual(profile.madp, 0.184)
         self.assertEqual(profile.mode, "custom")
@@ -48,7 +48,7 @@ class ProfileTests(unittest.TestCase):
         self.assertIsInstance(profile, PlantProfile)
         self.assertIn("Illustrative", profile.plant_name)
         with self.assertRaises(ValueError):
-            replace(profile, management_allowed_depletion=0)
+            replace(profile, management_allowed_depletion_point=0)
         with self.assertRaises(ValueError):
             replace(profile, mode="custom", preset_key="illustrative_lettuce")
 

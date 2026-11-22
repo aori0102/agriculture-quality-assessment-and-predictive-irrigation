@@ -9,7 +9,7 @@ from .datastreams import PROFILE_FIELDS, BlynkPins
 
 PRESET_KEY = "illustrative_lettuce"
 # Adapted from the repository's example, NOT agronomically established values.
-PRESET_THRESHOLDS = (0.10, 0.30, 0.22, 0.41)
+PRESET_THRESHOLDS = (0.10, 0.184, 0.22, 0.41)
 
 
 def _text(value: str, name: str, *, allow_empty: bool = False) -> None:
@@ -25,7 +25,7 @@ class PlantProfile:
     node_description: str
     plant_name: str
     permanent_wilting_point: float
-    management_allowed_depletion: float
+    management_allowed_depletion_point: float
     field_capacity: float
     saturation_point: float
     mode: Literal["custom", "preset"] = "custom"
@@ -39,8 +39,6 @@ class PlantProfile:
             value = getattr(self, name)
             if type(value) not in (int, float) or not 0 <= value <= 1:
                 raise ValueError(f"{name} must be a finite number between 0 and 1.")
-        if not 0 < self.management_allowed_depletion < 1:
-            raise ValueError("management_allowed_depletion must be strictly between 0 and 1.")
         if not 0 <= self.permanent_wilting_point < self.madp < self.field_capacity < self.saturation_point <= 1:
             raise ValueError("Require 0 <= PWP < MADP < FC < SP <= 1.")
         if self.mode == "preset":
@@ -54,9 +52,7 @@ class PlantProfile:
 
     @property
     def madp(self) -> float:
-        return self.field_capacity - self.management_allowed_depletion * (
-            self.field_capacity - self.permanent_wilting_point
-        )
+        return self.management_allowed_depletion_point
 
     def to_datastreams(self) -> dict[str, str | float | int]:
         values = {pin: getattr(self, name) for pin, name in PROFILE_FIELDS.items()}
@@ -65,7 +61,7 @@ class PlantProfile:
 
 
 THRESHOLD_FIELDS = (
-    "permanent_wilting_point", "management_allowed_depletion",
+    "permanent_wilting_point", "management_allowed_depletion_point",
     "field_capacity", "saturation_point",
 )
 

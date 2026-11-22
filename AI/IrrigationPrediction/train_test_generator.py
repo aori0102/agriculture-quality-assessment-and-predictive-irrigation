@@ -1,5 +1,9 @@
 import argparse
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from edge_logging import get_logger
+logger = get_logger("Dataset")
 
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -74,8 +78,8 @@ def generate_original_datasets():
     train_data.to_csv("datasets/train_data.csv", index=False)
     test_data.to_csv("datasets/test_data.csv", index=False)
     
-    print(f"Train data shape: {train_data.shape}")
-    print(f"Test data shape: {test_data.shape}")
+    logger.info(f"Train data shape: {train_data.shape}")
+    logger.info(f"Test data shape: {test_data.shape}")
 
 
 def generate_retrain_datasets(edge_log: Path, base_train: Path, output_dir: Path,
@@ -91,6 +95,14 @@ def generate_retrain_datasets(edge_log: Path, base_train: Path, output_dir: Path
     data[fc.TIMESTAMP] = timestamps.loc[data.index]
     data = data.dropna(subset=[fc.NODE_ID]).sort_values(fc.TIMESTAMP, kind="stable")
     data = data.drop_duplicates([fc.NODE_ID, fc.TIMESTAMP], keep="last")
+    # Offline actuation audit is authoritative; exclude uncertain history rather than treating it as zero.
+    import json
+    fallback_state = edge_log.resolve().parents[1] / "fallback_state.json"
+    if fallback_state.exists():
+        cutoffs = json.loads(fallback_state.read_text(encoding="utf-8"))["quarantine_until"]
+        for node, until in cutoffs.items():
+            data = data.loc[~((data[fc.NODE_ID] == node) & (data[fc.TIMESTAMP] <= pd.Timestamp(until)))].copy()
+
     measurements = [fc.SOIL_MOISTURE, fc.WEATHER_TEMPERATURE,
                     fc.WEATHER_HUMIDITY, fc.IRRIGATION_DURATION_MINUTES]
     for column in measurements:
@@ -121,7 +133,7 @@ def generate_retrain_datasets(edge_log: Path, base_train: Path, output_dir: Path
     train = pd.concat([base, edge_train], ignore_index=True)
     train.to_csv(output_dir / "train_data.csv", index=False)
     edge_test.to_csv(output_dir / "test_data.csv", index=False)
-    print(f"Prepared {len(edge_train)} Edge train rows and {len(edge_test)} Edge test rows.")
+    logger.info(f"Prepared {len(edge_train)} Edge train rows and {len(edge_test)} Edge test rows.")
 
 
 def main() -> None:

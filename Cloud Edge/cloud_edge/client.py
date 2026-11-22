@@ -157,6 +157,14 @@ class CloudClient:
             predicted_moisture_pct=predicted_moisture_pct,
         )
 
+    def log_event(self, *, node_id: str, code: str, description: str = "") -> None:
+        """Send a Timeline event; its code must already exist in the template."""
+        with self._lock:
+            self._ensure_open()
+            if node_id != self._node_id:
+                raise ValueError("node_id does not match this CloudClient's binding.")
+            self._http.log_event(code=code, description=description)
+
     def report_pump_status(self, *, node_id: str, is_on: bool) -> None:
         """Upload firmware-confirmed controller state to V4; return None.
 
