@@ -1,5 +1,6 @@
 
 #include "CameraUARTClient.h"
+#include "capture_error_protocol.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -180,16 +181,11 @@ void CameraUARTClient::processByte(uint8_t data) {
                 // Handle camera error packet.
                 if (m_errorPacket) {
 
-                    if (m_imageSize != 0) {
-                        Serial.println(
-                            "[CAMERA] Invalid error packet!"
-                        );
-                    } else {
-                        Serial.printf(
-                            "[CAMERA] Capture failed. Sample: %lu\n",
-                            static_cast<unsigned long>(m_sampleSeq)
-                        );
-                    }
+                    m_errorCode = m_detailedErrorPacket ? m_imageSize : 0;
+                    m_errorReason = m_detailedErrorPacket ? captureErrorName(m_errorCode) :
+                        (m_imageSize == 0 ? "legacy_ERR0_no_reason_update_S3_firmware" : "invalid_legacy_error_packet");
+                    Serial.printf("[CAMERA] CAPTURE FAILED seq=%lu code=%lu reason=%s\n",
+                        (unsigned long)m_sampleSeq, (unsigned long)m_errorCode, m_errorReason);
 
                     m_waitingForResponse = false;
                     m_captureError = true;
@@ -204,6 +200,7 @@ void CameraUARTClient::processByte(uint8_t data) {
                     m_imageSize == 0 ||
                     m_imageSize > MAX_IMAGE_SIZE
                 ) {
+                    m_errorReason = "invalid_uart_image_size";
                     Serial.printf(
                         "[CAMERA] Invalid image size: %lu\n",
                         static_cast<unsigned long>(m_imageSize)
@@ -223,7 +220,7 @@ void CameraUARTClient::processByte(uint8_t data) {
                 );
 
                 if (m_imageBuffer == nullptr) {
-
+                    m_errorReason = "esp32_image_buffer_allocation_failed";
                     Serial.println(
                         "[CAMERA] Failed to allocate image buffer!"
                     );
@@ -270,6 +267,7 @@ void CameraUARTClient::processByte(uint8_t data) {
                     Serial.println(
                         "[CAMERA] Invalid JPEG data!"
                     );
+                    m_errorReason = "received_uart_jpeg_invalid";
 
                     releaseImageBuffer();
 
@@ -327,8 +325,9 @@ void CameraUARTClient::processHeader() {
         return;
     }
 
-    // Camera error packet: ERR0
-    if (memcmp(m_header, "ERR0", HEADER_SIZE) == 0) {
+    // ERR0 is legacy; ERR1 carries an error code in the second uint32.
+    if (memcmp(m_header, "ERR0", HEADER_SIZE) == 0 || memcmp(m_header, "ERR1", HEADER_SIZE) == 0) {
+        m_detailedErrorPacket = memcmp(m_header, "ERR1", HEADER_SIZE) == 0;
 
         m_errorPacket = true;
 
@@ -439,7 +438,9 @@ void CameraUARTClient::handleTimeout() {
         return;
     }
 
-    Serial.println("[CAMERA] Response timeout!");
+    m_errorReason = "uart_response_timeout_30s";
+    Serial.printf("[CAMERA] Response timeout after 30000 ms; parser_state=%u received_bytes=%u expected_bytes=%lu\n",
+        static_cast<unsigned>(m_state), static_cast<unsigned>(m_receivedBytes), (unsigned long)m_imageSize);
 
     releaseImageBuffer();
 
@@ -478,6 +479,7 @@ void CameraUARTClient::resetParser() {
     m_receivedBytes = 0;
 
     m_errorPacket = false;
+    m_detailedErrorPacket = false;
 }
 
 void CameraUARTClient::reset() {
@@ -486,6 +488,7 @@ void CameraUARTClient::reset() {
 
     m_imageReady = false;
     m_captureError = false;
+    m_errorReason = "none"; m_errorCode = 0;
     m_waitingForResponse = false;
 
     m_sampleSeq = 0;

@@ -77,7 +77,7 @@ def handle_image(node_id: str, jpeg: bytes) -> None:
         logger.error(f"Could not process image from {node_id}: {error}")
 
 
-def main():
+def main(debug=False):
     cloud_reporter.on_pump_event = pump_coordinator.enqueue_event
     cfg_path = Path(__file__).with_name(CONFIG_FILE)
     cfg = ConfigParser()
@@ -106,6 +106,7 @@ def main():
     ready = False
     subscription_mid = None
     image_future = None
+    debug_console = None
     retrainer = ModelRetrainer(
         operation_log_manager, irrigation_handler, irrigation_data_handler.data_path,
         debug_hourly=cfg.getboolean("retrain", "debug_hourly", fallback=False),
@@ -133,6 +134,8 @@ def main():
     def on_event(client, userdata, message):
         if ready:
             node_id = strip_topic_to_node_id(message.topic, "events")
+            if debug_console is not None and debug_console.receive(message, node_id):
+                return
             if node_fallback.active_fallback.receive(message, node_id):
                 return
             if not cloud_reporter.receive_pump_event(message, node_id):
@@ -198,10 +201,18 @@ def main():
         cfg_path.parent / cfg.get("fallback", "policies_path", fallback="fallback_policies.json"),
         cfg_path.parent / cfg.get("fallback", "state_path", fallback="fallback_state.json"))
 
+    if debug:
+        from debug_console import DebugConsole
+        debug_console = DebugConsole(node_fallback.active_fallback, pump_coordinator,
+                                     command_proxy, operation_log_manager)
+        debug_console.start()
+
     logger.info(f"Connecting to {host}:{port}...")
     need_connection = True
     try:
         while True:
+            if debug_console is not None and not ready:
+                debug_console.tick()
             if need_connection:
                 try:
                     result = client.connect(host, port, keepalive=60)
@@ -228,6 +239,10 @@ def main():
             if ready and client.is_connected():
                 pump_coordinator.tick()
                 node_fallback.active_fallback.tick()
+                # Decide debug dispatch only after consuming current device
+                # state/ACKs and invalidating expired observations.
+                if debug_console is not None:
+                    debug_console.tick()
                 if retrainer.tick(can_swap=image_future is None or image_future.done()):
                     continue
                 irrigation_handler.loop()
@@ -235,6 +250,8 @@ def main():
     except KeyboardInterrupt:
         logger.info("Stopping Edge AI.")
     finally:
+        if debug_console is not None:
+            debug_console.close()
         try:
             client.disconnect()
         finally:

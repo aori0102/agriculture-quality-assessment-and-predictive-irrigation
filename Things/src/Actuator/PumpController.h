@@ -20,6 +20,7 @@ public:
 
     void begin();
 
+    const char* lastStartError = "none";
     bool start(uint32_t durationMs);
 
     void stop();

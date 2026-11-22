@@ -116,13 +116,26 @@ class CloudReporter:
                 return False
             states = {"pump_started": True, "pump_stopped": False}
             event = data.get("event")
-            if not isinstance(event, str) or event not in {*states, "capture_succeeded"}:
+            if not isinstance(event, str) or event not in {*states, "capture_succeeded", "capture_failed", "pump_start_rejected"}:
                 return False
             sent = TimeHelper.process_time(data.get("sent_at"), require_timezone=True)
             until = TimeHelper.process_time(data.get("valid_until"), require_timezone=True)
             now = now or datetime.now(timezone.utc)
             if sent is None or until is None or not sent <= now < until:
                 return False
+            if event == "capture_failed":
+                sequence, reason, code = data.get("sample_seq"), data.get("reason"), data.get("error_code")
+                if (type(sequence) is not int or not 0 <= sequence <= 0xffffffff
+                        or not isinstance(reason, str) or not 1 <= len(reason) <= 96 or not reason.isprintable()
+                        or type(code) is not int or not 0 <= code <= 0xffffffff):
+                    return False
+                with self.lock:
+                    previous = self.last_capture_event.get(node_id)
+                    if previous is not None and sent <= previous["sent_at"]:
+                        return False
+                    self.last_capture_event[node_id] = {"sent_at": sent, "sample_seq": sequence, "reason": reason}
+                logger.warning("CAPTURE FAILED node=%s seq=%s code=%s reason=%s", node_id, sequence, code, reason)
+                return True
             if event == "capture_succeeded":
                 sequence = data.get("sample_seq")
                 if type(sequence) is not int or not 0 <= sequence <= 0xffffffff:
@@ -137,6 +150,8 @@ class CloudReporter:
             if self.on_pump_event is not None:
                 self.on_pump_event(node_id, data)
                 return True
+            if event == "pump_start_rejected":
+                return False  # Needs coordinator correlation; never publish as OFF.
             with self.lock:
                 previous = self.last_pump_event.get(node_id)
                 if previous is not None and sent <= previous:

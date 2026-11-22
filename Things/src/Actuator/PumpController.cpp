@@ -65,24 +65,29 @@ void PumpController::begin() {
 }
 
 bool PumpController::start(uint32_t durationMs) {
+    lastStartError = "none";
 
     if (durationMs == 0 || durationMs > MAX_DURATION_MS) {
-        Serial.println("[PUMP] Rejected: invalid duration.");
+        lastStartError = "invalid_duration";
+
         return false;
     }
 
     if (!m_pwmInitialized) {
-        Serial.println("[PUMP] Rejected: PWM is not initialized.");
+        lastStartError = "pwm_uninitialized";
+
         return false;
     }
 
     if (m_pwmDuty == 0) {
-        Serial.println("[PUMP] Rejected: PWM duty is 0.");
+        lastStartError = "pwm_duty_zero";
+
         return false;
     }
 
     if (m_isRunning) {
-        Serial.println("[PUMP] Rejected: pump is already running.");
+        lastStartError = "pump_already_running";
+
         return false;
     }
 
@@ -93,19 +98,6 @@ bool PumpController::start(uint32_t durationMs) {
 
     m_isRunning = true;
     if (m_stateCallback) m_stateCallback(true);
-
-    Serial.println();
-    Serial.println("========== PUMP STARTED ==========");
-
-    Serial.print("[PUMP] Duration: ");
-    Serial.print(m_durationMs);
-    Serial.println(" ms");
-
-    Serial.print("[PUMP] PWM: ");
-    Serial.print(m_pwmDuty);
-    Serial.println("/255");
-
-    Serial.println("==================================");
 
     return true;
 }
@@ -125,8 +117,7 @@ void PumpController::stop() {
     m_startTime = 0;
     if (m_stateCallback) m_stateCallback(false);
 
-    Serial.println();
-    Serial.println("[PUMP] Pump stopped.");
+
 }
 
 void PumpController::update() {
@@ -139,7 +130,7 @@ void PumpController::update() {
 
     if (elapsedTime >= m_durationMs) {
 
-        Serial.println("[PUMP] Duration completed.");
+
 
         stop();
     }

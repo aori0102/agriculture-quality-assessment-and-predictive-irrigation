@@ -28,6 +28,9 @@ public:
     bool hasImage() const;
 
     bool hasError() const;
+    const char* errorReason() const { return m_errorReason; }
+    uint32_t errorCode() const { return m_errorCode; }
+    uint32_t sampleSequence() const { return m_sampleSeq; }
 
     bool isBusy() const;
 
@@ -71,6 +74,9 @@ private:
     bool m_waitingForResponse = false;
 
     bool m_errorPacket = false;
+    bool m_detailedErrorPacket = false;
+    const char* m_errorReason = "none";
+    uint32_t m_errorCode = 0;
 
     uint32_t m_requestTime = 0;
 

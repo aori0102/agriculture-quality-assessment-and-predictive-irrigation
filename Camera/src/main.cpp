@@ -4,6 +4,8 @@
 #include "img_converters.h"
 #include "esp_heap_caps.h"
 #include "rotate_ccw.h"
+#include "capture_error_protocol.h"
+CaptureError rotationError = CaptureError::JpegEncodeFailed;
 #include <cstdlib>
 #include <cstring>
 #include <cerrno>
@@ -119,16 +121,17 @@ bool sendUInt32(uint32_t value) {
 // SEND ERROR PACKET
 // =====================================================
 
-void sendError(uint32_t sampleSeq) {
+void sendError(uint32_t sampleSeq, CaptureError reason) {
     Serial.printf(
         "[CAMERA] Sending error response. Sequence: %lu\n",
         (unsigned long)sampleSeq
     );
 
-    cameraSerial.write("ERR0", 4);
-
+    Serial.printf("[CAMERA] ERROR seq=%lu code=%lu reason=%s\n", (unsigned long)sampleSeq,
+        (unsigned long)reason, captureErrorName(static_cast<uint32_t>(reason)));
+    cameraSerial.write("ERR1", 4);
     sendUInt32(sampleSeq);
-    sendUInt32(0);
+    sendUInt32(static_cast<uint32_t>(reason));
 
     cameraSerial.flush();
 }
@@ -248,15 +251,17 @@ bool rotateJpegCCW(const camera_fb_t* frame, uint8_t** jpeg, size_t* length) {
     *jpeg = nullptr;
     *length = 0;
     // Bound allocations to the configured capture dimensions.
-    if (frame->width != 800 || frame->height != 600) return false;
+    if (frame->width != 800 || frame->height != 600) { rotationError = CaptureError::UnexpectedResolution; return false; }
     const size_t bytes = static_cast<size_t>(frame->width) * frame->height * 3;
     auto* decoded = static_cast<uint8_t*>(heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     auto* rotated = static_cast<uint8_t*>(heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     if (!decoded || !rotated) {
+        rotationError = CaptureError::RgbAllocationFailed;
         free(decoded); free(rotated);
         return false;
     }
     if (!fmt2rgb888(frame->buf, frame->len, PIXFORMAT_JPEG, decoded)) {
+        rotationError = CaptureError::JpegDecodeFailed;
         free(decoded); free(rotated);
         return false;
     }
@@ -270,13 +275,15 @@ bool rotateJpegCCW(const camera_fb_t* frame, uint8_t** jpeg, size_t* length) {
     free(decoded);
     JpegOutput output;
     output.data = static_cast<uint8_t*>(heap_caps_malloc(MAX_IMAGE_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    if (!output.data) { free(rotated); return false; }
+    if (!output.data) { rotationError = CaptureError::OutputAllocationFailed; free(rotated); return false; }
     const bool encoded = fmt2jpg_cb(rotated, bytes, frame->height, frame->width,
         PIXFORMAT_RGB888, ROTATED_JPEG_QUALITY, writeRotatedJpeg, &output);
     free(rotated);
     if (!encoded || output.overflow || output.length < 4 ||
         output.data[0] != 0xff || output.data[1] != 0xd8 ||
         output.data[output.length - 2] != 0xff || output.data[output.length - 1] != 0xd9) {
+        rotationError = output.overflow ? CaptureError::OutputTooLarge :
+            (!encoded ? CaptureError::JpegEncodeFailed : CaptureError::InvalidRotatedJpeg);
         free(output.data);
         return false;
     }
@@ -299,7 +306,7 @@ void captureImage(uint32_t sampleSeq) {
     );
 
     if (!cameraReady) {
-        sendError(sampleSeq);
+        sendError(sampleSeq, CaptureError::CameraNotReady);
         return;
     }
     // Discard the frame queued while idle so the requested capture is fresh.
@@ -310,7 +317,7 @@ void captureImage(uint32_t sampleSeq) {
     if (frame == nullptr) {
         Serial.println("[CAMERA] Failed to capture image!");
 
-        sendError(sampleSeq);
+        sendError(sampleSeq, CaptureError::FrameUnavailable);
 
         return;
     }
@@ -334,11 +341,12 @@ void captureImage(uint32_t sampleSeq) {
     );
 
     if (!validJPEG || imageSize > MAX_IMAGE_SIZE) {
+        const CaptureError error = !validJPEG ? CaptureError::InvalidSourceJpeg : CaptureError::SourceTooLarge;
         Serial.println("[CAMERA] Invalid JPEG or image too large!");
 
         esp_camera_fb_return(frame);
 
-        sendError(sampleSeq);
+        sendError(sampleSeq, error);
 
         return;
     }
@@ -352,7 +360,7 @@ void captureImage(uint32_t sampleSeq) {
     esp_camera_fb_return(frame);
     if (!rotated) {
         Serial.println("[CAMERA] 90-degree CCW rotation/encoding failed; no image sent.");
-        sendError(sampleSeq);
+        sendError(sampleSeq, rotationError);
         return;
     }
     Serial.printf("[CAMERA] Rotated 90 CCW: 600 x 800, %u bytes, %lu ms\n",

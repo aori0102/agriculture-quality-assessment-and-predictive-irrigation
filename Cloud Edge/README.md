@@ -329,3 +329,12 @@ V4, while capture confirmation is stored in memory separately.
 These are controller/software confirmations, not flow-sensor measurements or
 confirmation that the cloud received the image. Failed/disconnected event
 publishes are not replayed. Offline tests/builds do not replace a hardware test.
+
+
+## Interactive hardware debug
+
+`python -m run_edge` keeps the normal launch behavior. Use
+`python -m run_edge --debug` to enable the `debug>` console with
+`simulate_pump`, `simulate_capture` and `simulate_node_connection_lost`.
+See [AI/DEBUG_MODE.md](../AI/DEBUG_MODE.md) for arguments, prerequisites,
+2-minute timeout, updated node firmware requirements, and validation limits.

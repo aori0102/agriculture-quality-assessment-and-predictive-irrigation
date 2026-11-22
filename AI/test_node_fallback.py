@@ -13,7 +13,7 @@ class FallbackTests(TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.path = Path(self.tmp.name)
         self.policy = self.path / 'policies.json'
-        self.policy.write_text(json.dumps({'nodes': {'n': {'enabled': True}}}))
+        self.policy.write_text(json.dumps({'nodes': {}}))
         self.clock = [0.0]
         self.profile = SimpleNamespace(pwp=10, madp=20, fc=36, auto_irrigation_enabled=True)
         self.profiles = SimpleNamespace(read_all_recorded_nodes=lambda: ['n'], get_node_profile=lambda n: self.profile)
@@ -28,6 +28,48 @@ class FallbackTests(TestCase):
         return dict(event='config_applied', config_version=self.manager.state['configs']['n']['version'],
                     session_id=self.manager.session, sync_nonce=self.manager.pending['n'],
                     journal_pending=0, pump_running=False, **extra)
+
+    def test_all_discovered_nodes_receive_automatic_defaults_without_entries(self):
+        self.profiles.read_all_recorded_nodes = lambda: ['n', 'new-node']
+        self.manager.tick()
+        for node in ('n', 'new-node'):
+            body = self.manager.state['configs'][node]['body']
+            self.assertTrue(body['fallback_enabled'])
+            self.assertEqual(body['emergency_threshold_pct'], 15)
+            self.assertEqual(body['rearm_threshold_pct'], 20)
+            self.assertEqual(body['duration_ms'], 6000)
+            self.assertEqual(body['cooldown_ms'], 30000)
+        self.assertIn('iot/e/new-node/config', [c.args[0] for c in self.client.publish.call_args_list])
+
+    def test_missing_file_uses_defaults_and_legacy_enabled_cannot_opt_out(self):
+        self.policy.unlink()
+        self.manager.tick()
+        self.assertTrue(self.manager.state['configs']['n']['body']['fallback_enabled'])
+        self.policy.write_text(json.dumps({'nodes': {'n': {'enabled': False, 'duration_ms': 7000}}}))
+        self.clock[0] = 5
+        self.manager.tick()
+        body = self.manager.state['configs']['n']['body']
+        self.assertTrue(body['fallback_enabled'])
+        self.assertEqual(body['duration_ms'], 7000)
+
+    def test_previously_disabled_snapshot_migrates_and_requires_new_ack(self):
+        disabled = self.manager.snapshot('n', self.profile, {}, allow_fallback=False)
+        self.manager.state['configs']['n'] = {'version': 8, 'body': disabled}
+        self.manager.ready['n'] = True
+        self.manager.tick()
+        self.assertEqual(self.manager.state['configs']['n']['version'], 9)
+        self.assertTrue(self.manager.state['configs']['n']['body']['fallback_enabled'])
+        self.assertNotIn('n', self.manager.ready)
+        self.assertFalse(self.manager.safe_for_prediction('n'))
+        self.receive(self.ack())
+        self.assertTrue(self.manager.safe_for_prediction('n'))
+
+    def test_invalid_one_node_limits_do_not_disable_other_nodes(self):
+        self.profiles.read_all_recorded_nodes = lambda: ['n', 'new-node']
+        self.policy.write_text(json.dumps({'nodes': {'n': {'duration_ms': 60001}}}))
+        self.manager.tick()
+        self.assertFalse(self.manager.state['configs']['n']['body']['fallback_enabled'])
+        self.assertTrue(self.manager.state['configs']['new-node']['body']['fallback_enabled'])
 
     def test_ack_identity_freshness_and_reconnect_gate(self):
         self.manager.tick()

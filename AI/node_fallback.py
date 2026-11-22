@@ -9,6 +9,8 @@ from uuid import uuid4
 import json
 import math
 import os
+from edge_logging import get_logger
+logger = get_logger("FALLBACK")
 
 
 def atomic_json(path, value):
@@ -29,6 +31,9 @@ class NodeFallback:
         self.clock = clock
         self.session = uuid4().hex
         self.pending, self.ready, self.last_seen = {}, {}, {}
+        self.debug_suspended = set()
+        self.debug_blocked = set()
+        self.policy_invalid = False
         self.sequence = 0
         self.last_tick = -float('inf')
         self.state = json.loads(self.state_path.read_text(encoding='utf-8')) if self.state_path.exists() else {}
@@ -40,15 +45,16 @@ class NodeFallback:
         topic = f'iot/{self.edge_id}/{node}/{suffix}'
         return self.client.publish(topic, json.dumps(payload, allow_nan=False), qos=qos, retain=False).rc == 0
 
-    def snapshot(self, node, profile, options):
+    def snapshot(self, node, profile, options, *, allow_fallback=True):
+        if not isinstance(options, dict):
+            raise ValueError('Expected a node limits object')
         def integer(name, default, low, high):
             value = options.get(name, default)
             if type(value) is not int or not low <= value <= high:
                 raise ValueError(name)
             return value
-        enabled = options.get('enabled', False)
-        if type(enabled) is not bool:
-            raise ValueError('enabled')
+        # Every node receives fallback automatically. Legacy per-node `enabled`
+        # is ignored; Auto remains the user's irrigation permission.
         emergency = options.get('emergency_threshold_pct', (profile.pwp + profile.madp) / 2)
         rearm = options.get('rearm_threshold_pct', profile.madp)
         thresholds = (profile.pwp, emergency, rearm, profile.madp, profile.fc)
@@ -57,11 +63,11 @@ class NodeFallback:
         if not (0 <= profile.pwp < emergency < rearm <= profile.fc <= 100 and emergency < profile.madp < profile.fc):
             raise ValueError('threshold ordering')
         return dict(schema_version=1, edge_id=self.edge_id, node_id=node,
-                    fallback_enabled=enabled and profile.auto_irrigation_enabled,
+                    fallback_enabled=allow_fallback and profile.auto_irrigation_enabled is True,
                     pwp_pct=profile.pwp, madp_pct=profile.madp, fc_pct=profile.fc,
                     emergency_threshold_pct=emergency, rearm_threshold_pct=rearm,
                     duration_ms=integer('duration_ms', 6000, 1, 60000),
-                    cooldown_ms=integer('cooldown_ms', 300000, 1000, 3600000),
+                    cooldown_ms=integer('cooldown_ms', 30000, 1000, 3600000),
                     required_low_samples=integer('required_low_samples', 3, 1, 100),
                     max_sample_age_ms=integer('max_sample_age_ms', 30000, 1000, 300000),
                     edge_timeout_ms=integer('edge_timeout_ms', 30000, 15000, 300000),
@@ -79,25 +85,36 @@ class NodeFallback:
         if now - self.last_tick < 5:
             return
         self.last_tick = now
+        policy_valid = True
         try:
             options = json.loads(self.policy_path.read_text(encoding='utf-8')) if self.policy_path.exists() else {'nodes': {}}
             if not isinstance(options, dict) or not isinstance(options.get('nodes'), dict):
                 raise ValueError('Expected a nodes object')
         except (OSError, ValueError):
             options = {'nodes': {}}
+            policy_valid = False
+        if not policy_valid and not self.policy_invalid:
+            logger.error("Invalid fallback limits file; disabling fallback until limits are valid")
+        self.policy_invalid = not policy_valid
         for node in self.profiles.read_all_recorded_nodes():
+            if node in self.debug_suspended:
+                self.ready.pop(node, None)
+                continue
             profile = self.profiles.get_node_profile(node)
             if profile is None:
                 continue
             try:
-                body = self.snapshot(node, profile, options.get('nodes', {}).get(node, {}))
+                body = self.snapshot(node, profile, options.get('nodes', {}).get(node, {}),
+                                     allow_fallback=policy_valid)
             except (ValueError, TypeError):
-                # Invalid edited policy revokes the previous enabled snapshot.
-                body = self.snapshot(node, profile, {'enabled': False})
+                # Invalid limits revoke actuation, without opting any node out.
+                body = self.snapshot(node, profile, {}, allow_fallback=False)
             old = self.state['configs'].get(node)
             if old is None or old['body'] != body:
                 old = {'version': (old['version'] + 1 if old else 1), 'body': body}
                 self.state['configs'][node] = old
+                logger.info("CONFIG node=%s version=%s fallback=%s auto=%s | automatic node policy",
+                            node, old['version'], body['fallback_enabled'], profile.auto_irrigation_enabled)
                 atomic_json(self.state_path, self.state)
                 self.ready.pop(node, None)
                 self.pending.pop(node, None)
@@ -156,8 +173,13 @@ class NodeFallback:
             return True
         return False
 
+    def control_ready(self, node):
+        """Fresh config/audit readiness, independent of model quarantine."""
+        return (node not in self.debug_blocked and node in self.ready
+                and self.clock() - self.last_seen.get(node, -float('inf')) <= 15)
+
     def safe_for_prediction(self, node):
-        if node not in self.ready or self.clock() - self.last_seen.get(node, -float('inf')) > 15:
+        if not self.control_ready(node):
             return False
         cutoff = self.state['quarantine_until'].get(node)
         return cutoff is None or datetime.now(timezone.utc) >= datetime.fromisoformat(cutoff)
@@ -168,7 +190,7 @@ active_fallback = None
 
 def control_ready(node):
     manager = active_fallback
-    return manager is None or (node in manager.ready and manager.clock() - manager.last_seen.get(node, -float('inf')) <= 15)
+    return manager is None or manager.control_ready(node)
 
 
 def prediction_allowed(node):

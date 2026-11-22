@@ -200,6 +200,7 @@ def main(argv=None) -> int:
         "--provisioning-status", action="store_true",
         help="Show stored device IDs and pending reconciliation without credentials or network",
     )
+    parser.add_argument("--debug", action="store_true", help="Enable interactive hardware debug console")
     args = parser.parse_args(argv)
     if args.provisioning_status:
         runtime = REPOSITORY / "Cloud Edge/runtime"
@@ -298,7 +299,7 @@ def main(argv=None) -> int:
             "IrrigationPrediction.telemetry_handler"
         ).telemetry_handler
         run_with_clients(
-            app.main,
+            (lambda: app.main(debug=True)) if args.debug else app.main,
             backend,
             bindings,
             pump_backend=pump_backend,
