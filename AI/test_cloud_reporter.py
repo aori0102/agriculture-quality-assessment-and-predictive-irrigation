@@ -151,6 +151,10 @@ class WiringTests(unittest.TestCase):
         msg=SimpleNamespace(topic='iot/edge/esp01/telemetry',payload=json.dumps(payload).encode())
         self.assertTrue(handler.record_sensors_telemetry(msg,'esp01'))
         reporter.submit.assert_called_once_with('send_telemetry',node_id='esp01',soil_index_pct=42,temperature_c=28.5,air_humidity_pct=65)
+        # The training row is sealed, but valid live measurements still upload.
+        reporter.reset_mock(); data.log_data.return_value = False
+        self.assertFalse(handler.record_sensors_telemetry(msg, 'esp01'))
+        reporter.submit.assert_called_once_with('send_telemetry', node_id='esp01', soil_index_pct=42, temperature_c=28.5, air_humidity_pct=65)
         reporter.reset_mock();payload['node_id']='wrong';msg.payload=json.dumps(payload).encode()
         self.assertFalse(handler.record_sensors_telemetry(msg,'esp01'))
         reporter.submit.assert_not_called()

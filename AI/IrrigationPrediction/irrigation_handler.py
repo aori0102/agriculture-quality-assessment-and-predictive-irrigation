@@ -164,7 +164,7 @@ class IrrigationHandler:
         if not prediction_allowed(node_id):
             return False
         profile = operation_log_manager.get_node_profile(node_id)
-        if profile is None or profile.auto_irrigation_enabled is not True:
+        if profile is None:
             return False
 
         target_sample_time = self.current_sample_slot
@@ -199,6 +199,10 @@ class IrrigationHandler:
         plant_profile = operation_log_manager.get_node_profile(node_id)
         logger.info("PREDICT node=%s soil=%.1f%% next_without_irrigation=%.1f%%",
                     node_id, current_soil_moisture, float(next_moisture_without_irrigation))
+
+        # Auto controls actuation, not visibility of a valid forecast.
+        if plant_profile.auto_irrigation_enabled is not True:
+            return telemetry_handler.record_irrigation_data(0, node_id=node_id, timestamp=target_sample_time)
 
         skip_irrigation = (
             current_soil_moisture > plant_profile.fc or

@@ -73,6 +73,7 @@ class TelemetryHandler:
         if fc.SAMPLED_AT in data and timestamp.tzinfo is None:
             logger.warning(f"Expected a timezone in sampled_at on {message.topic}")
             return False
+        observed_at = timestamp
         timestamp = TimeHelper.floor_to_nearest_ten_minutes(timestamp.astimezone(timezone.utc))
         
         if not isinstance(quality, dict):
@@ -94,15 +95,14 @@ class TelemetryHandler:
             logger.warning(f"Invalid air relative humidity percentage on {message.topic}: {humidity_pct}")
             return False
         
-        if not irrigation_data_handler.log_data(
+        recorded = irrigation_data_handler.log_data(
             timestamp=timestamp,
             node_id=node_id,
             soil_moisture=soil_moisture_pct,
             weather_temperature=air_temp_c,
             weather_humidity=humidity_pct,
-        ):
-            return False
-
+        )
+        # A sealed training window must not freeze live dashboard telemetry.
         operation_log_manager.log_node(node_id)  # Record the node ID as acquired
         logger.info("ACCEPTED node=%s soil=%.1f%% temp=%.1fC humidity=%.1f%% sampled_at=%s",
                     node_id, soil_moisture_pct, air_temp_c, humidity_pct, timestamp.isoformat())
@@ -119,7 +119,11 @@ class TelemetryHandler:
                 pass
         else:
             cloud_reporter.submit("send_telemetry", node_id=node_id, **snapshot)
-        return True
+        profile = operation_log_manager.get_node_profile(node_id)
+        if profile is not None and 0 <= (datetime.now(timezone.utc) - observed_at).total_seconds() <= 120:
+            cloud_reporter.observe_soil(node_id=node_id, soil_pct=soil_moisture_pct,
+                                        pwp_pct=profile.pwp * 100, madp_pct=profile.madp * 100)
+        return recorded
     
 
     def record_irrigation_data(self, irrigation_value: float, node_id: str, timestamp: datetime) -> bool:

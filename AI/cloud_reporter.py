@@ -8,6 +8,8 @@ from queue import Queue, Full
 from threading import Thread, Lock
 
 from time_helper import TimeHelper
+from time import monotonic
+from collections import deque
 
 
 class CloudReporter:
@@ -19,6 +21,10 @@ class CloudReporter:
         self.last_capture_event = {}
         self.lock = Lock()
         self.on_pump_event = None
+        self.event_times = {}
+        self.event_budget = {}
+        self.soil_alert = {}
+        self.unbound_nodes = set()
 
     def configure(self, clients):
         if self.worker is not None:
@@ -30,13 +36,50 @@ class CloudReporter:
 
     def submit(self, method, *, node_id, **values):
         if self.clients.get(node_id) is None:
+            if node_id not in self.unbound_nodes:
+                logger.warning("UPLOAD SKIPPED node=%s | no Blynk binding; run Cloud Edge/run_edge.py and check provisioning", node_id)
+                self.unbound_nodes.add(node_id)
             return False
+        self.unbound_nodes.discard(node_id)
         try:
             self.queue.put_nowait((method, node_id, values))
             return True
         except Full:
             logger.warning("Cloud upload queue full; update dropped")
             return False
+
+    def emit_event(self, *, node_id, code, description):
+        # Shared budget across all event types. Reserve before queueing, never
+        # retry ambiguous HTTP outcomes (which may already have reached Blynk).
+        now = monotonic()
+        with self.lock:
+            history = self.event_budget.setdefault(node_id, deque())
+            while history and now - history[0] >= 86400:
+                history.popleft()
+            key = (node_id, code)
+            if len(history) >= 90 or now - self.event_times.get(key, -float('inf')) < 60:
+                return False
+            if not self.submit("log_event", node_id=node_id, code=code,
+                               description=description[:300]):
+                return False
+            history.append(now)
+            self.event_times[key] = now
+            return True
+
+    def observe_soil(self, *, node_id, soil_pct, pwp_pct, madp_pct):
+        """One warning per dry episode, escalating once below PWP; rearm at MADP."""
+        if not 0 <= pwp_pct < madp_pct <= 100 or not 0 <= soil_pct <= 100:
+            return
+        level = self.soil_alert.get(node_id, 0)
+        if soil_pct >= madp_pct:
+            self.soil_alert[node_id] = 0
+            return
+        target = 2 if soil_pct <= pwp_pct else 1
+        if target > level:
+            code = "soil_moisture_critical" if target == 2 else "soil_moisture_low"
+            if self.emit_event(node_id=node_id, code=code, description=(
+                    f"Node {node_id}: soil {soil_pct:.1f}%, PWP {pwp_pct:.1f}%, MADP {madp_pct:.1f}%")):
+                self.soil_alert[node_id] = target
 
     def _run(self):
         while True:
@@ -48,9 +91,12 @@ class CloudReporter:
                 client = self.clients.get(node_id)
                 if client is not None:
                     getattr(client, method)(node_id=node_id, **values)
+                    logger.info("UPLOAD node=%s method=%s | Blynk accepted", node_id, method)
             except Exception as error:
                 # Do not log transport exception text, which may contain credentials.
-                logger.error(f"Cloud upload failed: {type(error).__name__}")
+                logger.error("UPLOAD FAILED node=%s method=%s type=%s category=%s status=%s",
+                             node_id, method, type(error).__name__,
+                             getattr(error, "category", "unknown"), getattr(error, "status_code", None))
             finally:
                 self.queue.task_done()
 
