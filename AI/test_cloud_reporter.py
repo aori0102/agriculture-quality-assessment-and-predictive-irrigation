@@ -64,6 +64,34 @@ class ReporterTests(unittest.TestCase):
             r.close()
         client.report_pump_status.assert_not_called()
 
+    def test_rejection_uses_coordinator_and_never_becomes_off_status(self):
+        r = CloudReporter()
+        r.on_pump_event = Mock()
+        message = self.event('pump_start_rejected', command_id='command', reason='cooldown',
+                             detail='Wait 240000 ms', retry_after_ms=240000)
+        self.assertTrue(r.receive_pump_event(message, 'esp01'))
+        r.on_pump_event.assert_called_once()
+        r.on_pump_event = None
+        self.assertFalse(r.receive_pump_event(message, 'esp01'))
+        self.assertTrue(r.queue.empty())
+        message.retain = True
+        self.assertFalse(r.receive_pump_event(message, 'esp01'))
+
+    def test_capture_failure_reason_logged_without_pump_state(self):
+        r = CloudReporter()
+        r.on_pump_event = Mock()
+        message = self.event('capture_failed', sample_seq=17, error_code=7, reason='jpeg_decode_failed')
+        with self.assertLogs('edge.cloud', level='WARNING') as logs:
+            self.assertTrue(r.receive_pump_event(message, 'esp01'))
+        self.assertIn('reason=jpeg_decode_failed', logs.output[0])
+        self.assertFalse(r.receive_pump_event(message, 'esp01'))
+        r.on_pump_event.assert_not_called()
+        self.assertTrue(r.queue.empty())
+        for change in (dict(sample_seq=True), dict(error_code=-1), dict(reason='bad\nreason'), dict(reason={})):
+            fields = dict(sample_seq=17, error_code=7, reason='jpeg_decode_failed')
+            fields.update(change)
+            self.assertFalse(r.receive_pump_event(self.event('capture_failed', **fields), 'esp01'))
+
     def test_invalid_events(self):
         r = CloudReporter()
         for changes in [dict(node_id='other'), dict(sent_at='bad'), dict(sent_at='2026-11-07T01:00:00'),

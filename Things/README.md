@@ -37,3 +37,44 @@ the original opening hold does not close it. Closing stops DNS/HTTP and the AP;
 the station/MQTT connection can continue, and the LED returns to connection status.
 Closing does not save form edits or restart the device. Existing restart and
 sleep hold gestures remain unchanged.
+
+## Edge heartbeat loss log
+
+When the stored `edge_timeout_ms` expires (default 30 seconds), Things prints
+`[FALLBACK] HEARTBEAT LOST node=... | no Edge heartbeat for ... ms` once per
+loss episode, before evaluating Auto, moisture, cooldown or pump limits. A
+valid heartbeat rearms the log for the next loss. A newly accepted Edge session
+starts a fresh timeout. A stored fallback configuration is required to know the
+timeout; the log does not claim that the pump started.
+
+## Compact runtime Serial log
+
+Routine config/heartbeat JSON payload dumps and QoS publish-ACK lines are quiet.
+Each sensor transmission uses one `[TELEM]` summary. SDK logging is set to
+warning/error level (`CORE_DEBUG_LEVEL=2`).
+
+For pump commands, follow the exact command ID:
+
+```text
+[CMD RX] action=start_pump id=<command_id> duration_ms=3000
+[PUMP ON] id=<command_id>
+[PUMP OFF] id=<command_id>
+```
+
+A refused run logs `[PUMP REJECT] id=... reason=cooldown retry_ms=... detail=...`.
+Duplicate starts log `[CMD SKIP] ... reason=duplicate_start`; command-storage
+failures are explicit. RX only means the JSON command reached processing;
+ON means controller start succeeded. Physical water delivery is not measured.
+Repeated five-second state publications still happen but do not spam Serial.
+Local fallback starts use `[PUMP LOCAL] run=... duration_ms=...`. Capture-error
+diagnostics and heartbeat-loss warnings remain visible. Firmware build validation
+does not flash the board or exercise the real pump.
+
+## Hourly run-count limit removed
+
+Things no longer rejects pump starts based on `max_runs_per_hour`. The legacy
+configuration field and NVS run counter are retained for wire/storage
+compatibility, but the count does not authorize or reject a run. Reflash Things
+to apply this change. The configured cumulative duration budget (default
+60,000 ms), cooldown (default 30 seconds), per-run 60,000 ms cap and fallback
+dry-episode conditions still apply.

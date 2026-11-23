@@ -229,6 +229,7 @@ void MQTTClient::begin(
     m_configTopic = baseTopic + "/config";
     m_heartbeatTopic = baseTopic + "/heartbeat";
     m_ackTopic = baseTopic + "/fallback_ack";
+    m_debugTopic = baseTopic + "/debug";
     m_eventTopic = baseTopic + "/events";
     m_bootId = String(esp_random(), HEX) + String(esp_random(), HEX);
 
@@ -278,10 +279,7 @@ void MQTTClient::begin(
     // Publish acknowledgement callback.
     // ---------------------------------------------
 
-    m_client.onPublish([](uint16_t packetId) {
-        Serial.print("[MQTT] Publish acknowledged. Packet ID: ");
-        Serial.println(packetId);
-    });
+    // Routine QoS publish acknowledgements are intentionally quiet.
 
     // ---------------------------------------------
     // Incoming message callback.
@@ -335,7 +333,30 @@ void MQTTClient::setPumpStateCallback(std::function<bool()> callback) {
     m_pumpStateCallback = callback;
 }
 
+bool MQTTClient::publishPumpStartRejected(const String& commandId, const char* reason, const String& detail, uint32_t retryMs) {
+    Serial.printf("[PUMP REJECT] id=%s reason=%s retry_ms=%lu detail=%s\n", commandId.c_str(),
+        reason, static_cast<unsigned long>(retryMs), detail.c_str());
+    const time_t now = time(nullptr);
+    if (!m_client.connected() || now < 1700000000) return false;
+    auto timestamp = [](time_t value) {
+        struct tm utc; gmtime_r(&value, &utc); char buffer[25];
+        strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%SZ", &utc); return String(buffer);
+    };
+    JsonDocument d;
+    d["node_id"] = m_clientId; d["event"] = "pump_start_rejected";
+    d["boot_id"] = m_bootId; d["sequence"] = ++m_eventSequence; d["command_id"] = commandId;
+    d["reason"] = reason; d["detail"] = detail; d["retry_after_ms"] = retryMs;
+    d["sent_at"] = timestamp(now); d["valid_until"] = timestamp(now + 10);
+    String value; serializeJson(d, value);
+    return publishControlEvent(value);
+}
+
 bool MQTTClient::publishPumpState(bool isOn, const String& commandId) {
+    if (!m_hasSerialPumpState || m_serialPumpOn != isOn) {
+        const String& id = commandId.isEmpty() ? m_activeRunId : commandId;
+        Serial.printf("[PUMP %s] id=%s\n", isOn ? "ON" : "OFF", id.isEmpty() ? "-" : id.c_str());
+        m_hasSerialPumpState = true; m_serialPumpOn = isOn;
+    }
     const time_t now = time(nullptr);
     if (!m_client.connected() || now < 1700000000) return false;
     auto timestamp = [](time_t value) {
@@ -398,6 +419,7 @@ void MQTTClient::subscribeCommandTopic() {
     m_client.subscribe(m_configTopic.c_str(), 1);
     m_client.subscribe(m_heartbeatTopic.c_str(), 0);
     m_client.subscribe(m_ackTopic.c_str(), 1);
+    m_client.subscribe(m_debugTopic.c_str(), 1);
     uint16_t packetId = m_client.subscribe(
         m_commandTopic.c_str(),
         1
@@ -427,7 +449,7 @@ void MQTTClient::handleIncomingMessage(
         return;
     }
 
-    if (m_commandTopic != topic && m_configTopic != topic && m_heartbeatTopic != topic && m_ackTopic != topic) {
+    if (m_commandTopic != topic && m_configTopic != topic && m_heartbeatTopic != topic && m_ackTopic != topic && m_debugTopic != topic) {
         return;
     }
 
@@ -483,13 +505,8 @@ void MQTTClient::handleIncomingMessage(
         return;
     }
 
-    Serial.println("\n========== MQTT COMMAND RECEIVED ==========");
-
-    Serial.print("[MQTT] Topic: ");
-    Serial.println(topic);
-
-    Serial.println("[MQTT] Payload:");
-    Serial.println(m_incomingPayload);
+    // Config/heartbeat traffic is routine; command logs are emitted only
+    // by processCommand on the application loop, never as raw payload dumps.
 
     {
         std::lock_guard<std::mutex> lock(m_queueMutex);
@@ -522,6 +539,11 @@ void MQTTClient::processCommand(
 
         return;
     }
+
+    const char* logAction = document["action"].is<const char*>() ? document["action"].as<const char*>() : "?";
+    const char* logId = document["command_id"].is<const char*>() ? document["command_id"].as<const char*>() : "-";
+    Serial.printf("[CMD RX] action=%s id=%s duration_ms=%lu\n", logAction, logId,
+        static_cast<unsigned long>(document["duration_ms"].as<uint32_t>()));
 
     // ---------------------------------------------
     // 1. Validate required fields.
@@ -619,12 +641,6 @@ void MQTTClient::processCommand(
         return;
     }
 
-    Serial.println("[COMMAND] Edge ID: valid");
-    Serial.println("[COMMAND] Node ID: valid");
-    Serial.println("[COMMAND] TTL: valid");
-
-    Serial.print("[COMMAND] Action: ");
-    Serial.println(action);
 
     // ---------------------------------------------
     // 5. Process capture command.
@@ -687,31 +703,29 @@ void MQTTClient::processCommand(
         }
 
         Preferences history;
-        if (!history.begin("pump_commands", false)) return;
-        if (history.getString("last_start", "") == commandId ||
-            history.putString("last_start", commandId) != commandId.length()) {
+        if (!history.begin("pump_commands", false)) {
+            Serial.printf("[CMD REJECT] id=%s reason=command_storage_unavailable\n", commandId.c_str()); return;
+        }
+        if (history.getString("last_start", "") == commandId) {
             history.end();
-            return;
+            Serial.printf("[CMD SKIP] id=%s reason=duplicate_start\n", commandId.c_str()); return;
+        }
+        if (history.putString("last_start", commandId) != commandId.length()) {
+            history.end();
+            Serial.printf("[CMD REJECT] id=%s reason=command_persist_failed\n", commandId.c_str()); return;
         }
         history.end();
-
-        Serial.println("[COMMAND] Pump command accepted!");
-
-        Serial.print("[COMMAND] Pump duration: ");
-        Serial.print(durationMs);
-        Serial.println(" ms");
 
         bool started = m_pumpCommandCallback(durationMs);
 
         if (started) {
             m_activeRunId = commandId;
             publishPumpState(true, commandId);
-            Serial.println("[COMMAND] Pump started successfully!");
+
         }
         else {
-            Serial.println(
-                "[COMMAND] Pump start failed or pump is already running!"
-            );
+            if (m_pumpStartRejectedCallback) m_pumpStartRejectedCallback(commandId);
+            if (!m_pumpStartRejectedCallback) Serial.printf("[PUMP REJECT] id=%s reason=unspecified_callback_failure\n", commandId.c_str());
         }
 
         return;
@@ -799,13 +813,6 @@ bool MQTTClient::publishTelemetry(const String& payload) {
         return false;
     }
 
-    Serial.println("[MQTT] Telemetry queued for publishing");
-
-    Serial.print("[MQTT] Topic: ");
-    Serial.println(m_telemetryTopic);
-
-    Serial.print("[MQTT] Packet ID: ");
-    Serial.println(packetId);
 
     return true;
 }
@@ -871,7 +878,7 @@ bool MQTTClient::publishImage(
 }
 
 
-bool MQTTClient::publishEvent(const char* event, uint32_t sampleSeq) {
+bool MQTTClient::publishEvent(const char* event, uint32_t sampleSeq, const char* reason, uint32_t errorCode) {
     if (!m_client.connected()) return false;
     struct timeval tv;
     gettimeofday(&tv, nullptr);
@@ -889,7 +896,12 @@ bool MQTTClient::publishEvent(const char* event, uint32_t sampleSeq) {
     document["event"] = event;
     document["sent_at"] = timestamp(tv.tv_sec, tv.tv_usec);
     document["valid_until"] = timestamp(tv.tv_sec + 60, tv.tv_usec);
-    if (strcmp(event, "capture_succeeded") == 0) document["sample_seq"] = sampleSeq;
+    if (strcmp(event, "capture_succeeded") == 0 || strcmp(event, "capture_failed") == 0)
+        document["sample_seq"] = sampleSeq;
+    if (strcmp(event, "capture_failed") == 0) {
+        document["reason"] = reason ? reason : "unknown_capture_failure";
+        document["error_code"] = errorCode;
+    }
     String payload;
     serializeJson(document, payload);
     String topic = "iot/" + m_edgeId + "/" + m_clientId + "/events";

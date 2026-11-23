@@ -16,10 +16,24 @@ class NodeFallback {
     uint32_t lastHeartbeat = 0, lastSample = 0, lastStop = 0, hourStart = 0;
     uint32_t heartbeatSequence = 0, lowSamples = 0, startedAt = 0, lastAudit = 0;
     bool healthy = false, sampleValid = false, haveHeartbeat = false, previousRunning = false;
+    bool heartbeatLossLogged = false;
     String runId, source;
     uint32_t requestedDuration = 0;
     float moisture = 0;
     uint32_t serial = 0;
+    String debugId, debugLastId, debugRunId;
+    uint32_t debugDelay = 0, debugSince = 0, debugStoppedAt = 0, debugActual = 0, debugLastAck = 0;
+    bool debugStopped = false;
+
+    void debugReply(const char* event) {
+        if (!publish || debugId.isEmpty()) return;
+        JsonDocument reply;
+        reply["event"] = event; reply["edge_id"] = edge; reply["node_id"] = node;
+        reply["session_id"] = session; reply["simulation_id"] = debugId;
+        reply["pump_running"] = pump.isRunning(); reply["source"] = "local_fallback";
+        reply["run_id"] = debugRunId; reply["actual_duration_ms"] = debugActual;
+        String value; serializeJson(reply, value); publish(value);
+    }
 
     bool save() {
         String value;
@@ -81,6 +95,33 @@ public:
         if (!healthy) return;
         JsonDocument d;
         if (deserializeJson(d, payload) || d["edge_id"].as<String>() != edge || d["node_id"].as<String>() != node) return;
+        if (topic.endsWith("/debug")) {
+            if (session.isEmpty() || d["session_id"].as<String>() != session) return;
+            String id = d["simulation_id"].as<String>();
+            if (id.length() != 32) return;
+            if (d["action"] == "cancel") {
+                if (id == debugId) { debugLastId = debugId; debugId = ""; debugStopped = false; }
+                return; // Cancels debug tracking, never interrupts the pump timer.
+            }
+            if (d["action"] != "arm" || !d["expires_at_epoch"].is<int64_t>() ||
+                    !d["after_pump_delay_ms"].is<uint32_t>()) return;
+            int64_t now = int64_t(time(nullptr)), expires = d["expires_at_epoch"];
+            if (now < 1700000000 || expires <= now || expires - now > 15 ||
+                    d["after_pump_delay_ms"].as<uint32_t>() > 120000 || id == debugLastId) return;
+            if (!debugId.isEmpty()) {
+                if (id == debugId) debugReply("debug_simulation_armed");
+                return;
+            }
+            debugId = id;
+            if (!hasConfig() || !state["config"]["fallback_enabled"].as<bool>() ||
+                    state["stop_locked"].as<bool>() || state["dry_used"].as<bool>() || pump.isRunning()) {
+                debugReply("debug_simulation_rejected"); debugLastId = debugId; debugId = ""; return;
+            }
+            debugDelay = d["after_pump_delay_ms"]; debugSince = millis();
+            debugStopped = false; debugRunId = ""; debugActual = 0;
+            debugReply("debug_simulation_armed");
+            return;
+        }
         if (topic.endsWith("/fallback_ack")) {
             JsonArray entries = state["journal"].as<JsonArray>();
             if (entries.size() && entries[0]["event_id"].as<String>() == d["event_id"].as<String>()) {
@@ -93,6 +134,7 @@ public:
             uint32_t seq = d["sequence"];
             if (seq <= heartbeatSequence) return;
             heartbeatSequence = seq; lastHeartbeat = millis(); haveHeartbeat = true;
+            heartbeatLossLogged = false;
             lowSamples = 0;
             return;
         }
@@ -133,8 +175,10 @@ public:
             lowSamples = 0;
         }
         if (session != incomingSession) {
+            debugLastId = debugId; debugId = ""; debugStopped = false;
             session = incomingSession; heartbeatSequence = 0; haveHeartbeat = false;
             lastHeartbeat = millis();
+            heartbeatLossLogged = false;
         }
         JsonDocument ack;
         ack["event"] = "config_applied"; ack["edge_id"] = edge; ack["node_id"] = node;
@@ -156,14 +200,30 @@ public:
             if (lowSamples < 100) ++lowSamples;
         } else lowSamples = 0;
     }
+    const char* lastStartError = "none";
+    String lastStartDetail;
+    uint32_t lastStartRetryMs = 0;
     bool start(uint32_t duration, bool fallback = false) {
-        if (!healthy || pump.isRunning()) return false;
+        lastStartError = "none"; lastStartDetail = ""; lastStartRetryMs = 0;
+        auto reject = [&](const char* reason, const String& detail, uint32_t retryMs = 0) {
+            lastStartError = reason; lastStartDetail = detail; lastStartRetryMs = retryMs;
+
+            return false;
+        };
+        if (!healthy) return reject("storage_unavailable", "Persistent safety state is unavailable");
+        if (pump.isRunning()) return reject("pump_already_running", "Pump is ON; existing run was not extended");
         if (hasConfig()) {
-            if (!elapsed(lastStop, setting("cooldown_ms")) ||
-                state["runs"].as<uint32_t>() >= setting("max_runs_per_hour") ||
-                state["total_ms"].as<uint32_t>() + duration > setting("max_total_duration_ms_per_hour")) return false;
+            uint32_t sinceStop = uint32_t(millis() - lastStop);
+            if (sinceStop < setting("cooldown_ms"))
+                return reject("cooldown", "Wait " + String(setting("cooldown_ms") - sinceStop) + " ms after last stop", setting("cooldown_ms") - sinceStop);
+            // Run-count limit retired. Keep legacy wire/NVS fields compatible;
+            // cooldown and cumulative duration budget still apply.
+            uint32_t total = state["total_ms"];
+            if (total + duration > setting("max_total_duration_ms_per_hour"))
+                return reject("hourly_duration_limit", "Used " + String(total) + " ms; requested " + String(duration) + " ms; limit " + String(setting("max_total_duration_ms_per_hour")) + " ms");
         }
-        if (duration == 0 || duration > 60000 || state["journal"].size() >= 30) return false;
+        if (duration == 0 || duration > 60000) return reject("invalid_duration", "duration_ms must be 1..60000");
+        if (state["journal"].size() >= 30) return reject("audit_journal_full", "30 audit entries pending; wait for Edge reconciliation");
         runId = boot + "-run-" + String(++serial); source = fallback ? "local_fallback" : "edge";
         requestedDuration = duration;
         state["running"] = true; state["run_id"] = runId;
@@ -171,17 +231,36 @@ public:
         state["total_ms"] = state["total_ms"].as<uint32_t>() + duration;
         if (fallback) state["dry_used"] = true;
         audit("start_reserved");
-        if (!save()) return false; // Reserve budget and journal BEFORE motor power.
+        if (!save()) return reject("state_persist_failed", "Could not reserve safety state before motor power");
         hourStart = startedAt = millis(); previousRunning = true;
-        if (!pump.start(duration)) { previousRunning = false; state["running"] = false; audit("start_failed"); save(); return false; }
+        if (!pump.start(duration)) { previousRunning = false; state["running"] = false; audit("start_failed"); save(); return reject(pump.lastStartError, "Pump controller refused start; see node controller log"); }
+        if (fallback) Serial.printf("[PUMP LOCAL] run=%s duration_ms=%lu\n", runId.c_str(), (unsigned long)duration);
+        if (fallback && !debugId.isEmpty()) debugRunId = runId;
         return true;
     }
     void stop() { state["stop_locked"] = true; save(); pump.stop(); }
     void tick() {
+        // Detect loss before evaluating storage health, Auto, moisture or pump limits.
+        if (hasConfig() && !heartbeatLossLogged && elapsed(lastHeartbeat, setting("edge_timeout_ms"))) {
+            heartbeatLossLogged = true;
+            Serial.printf("[FALLBACK] HEARTBEAT LOST node=%s | no Edge heartbeat for %lu ms\n",
+                node.c_str(), static_cast<unsigned long>(uint32_t(millis() - lastHeartbeat)));
+        }
         if (!healthy) { pump.stop(); return; }
         if (previousRunning && !pump.isRunning()) {
             previousRunning = false; lastStop = millis();
             state["running"] = false; audit("stopped", millis() - startedAt); save();
+            if (!debugId.isEmpty() && debugRunId == runId && source == "local_fallback") {
+                debugStopped = true; debugStoppedAt = millis(); debugActual = millis() - startedAt;
+                debugLastAck = millis() - 2000;
+            }
+        }
+        if (!debugId.isEmpty()) {
+            if (elapsed(debugSince, 120000)) {
+                debugLastId = debugId; debugId = ""; debugStopped = false;
+            } else if (debugStopped && !pump.isRunning() && elapsed(debugStoppedAt, debugDelay) && elapsed(debugLastAck, 2000)) {
+                debugLastAck = millis(); debugReply("debug_simulation_completed");
+            }
         }
         if (elapsed(hourStart, 3600000)) {
             hourStart = millis(); state["runs"] = 0; state["total_ms"] = 0; save();

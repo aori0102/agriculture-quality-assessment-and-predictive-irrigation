@@ -43,6 +43,12 @@ class CommandProxy:
         if type(duration_ms) is not int or duration_ms < 0:
             raise ValueError("duration_ms must be a non-negative integer")
 
+        import node_fallback
+        manager = node_fallback.active_fallback
+        if manager is not None and node_id in manager.debug_blocked and action is not ActionIndex.StopPump:
+            logger.warning("Command blocked during connection-loss simulation: node=%s", node_id)
+            return False
+
         client = self.mqtt_client
         if client is None:
             logger.warning("Cannot send command: MQTT publisher is not configured")
@@ -84,8 +90,8 @@ class CommandProxy:
             logger.warning(f"Could not queue command on {topic}: {mqtt.error_string(result.rc)}")
             return False
 
-        logger.info("QUEUED node=%s action=%s duration_ms=%s ttl_ms=%s",
-                    node_id, action.value, duration_ms, ttl_ms)
+        logger.info("QUEUED node=%s action=%s id=%s duration_ms=%s ttl_ms=%s",
+                    node_id, action.value, command_id or "-", duration_ms, ttl_ms)
         return True
 
 

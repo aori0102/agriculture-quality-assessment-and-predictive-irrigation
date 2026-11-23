@@ -68,8 +68,37 @@ Each captured 800x600 JPEG is decoded in PSRAM, rotated **90 degrees countercloc
 and re-encoded as a **600x800 JPEG** before the IMG0 UART packet is sent.
 Sensor JPEG quality remains 15; software encoder quality is 85/100 (a different
 scale). Temporary RGB buffers use about 2.75 MiB of PSRAM. The encoded image is
-bounded to 256 KiB. Allocation/decode/encode/size failures produce ERR0, never an
+bounded to 256 KiB. Allocation/decode/encode/size failures produce ERR1 with a specific reason, never an
 unrotated fallback image. The rotation log includes elapsed milliseconds for
 checking the existing Things 30-second response timeout. This processing adds
 latency and JPEG recompression; actual timing and color require a board test.
 Compile-time non-square fixtures check the CCW coordinate mapping.
+
+## Capture failure diagnostics (2026-11-22)
+
+The camera now sends `ERR1` + uint32 sequence + uint32 reason code (little
+endian); there is no error-message payload. Both firmware copies of
+`capture_error_protocol.h` define the same wire codes and printable names.
+Flash both Camera and Things for named remote errors. Updated Things still
+accepts old ERR0 and reports `legacy_ERR0_no_reason_update_S3_firmware`.
+The successful IMG0 format and 30-second Things timeout are unchanged. There
+is still no immediate request-received ACK.
+
+Codes: 1 camera not ready; 2 frame unavailable; 3 source JPEG invalid;
+4 source JPEG exceeds 256 KiB; 5 rotation input is not 800x600;
+6 RGB PSRAM allocation failed; 7 JPEG decode failed;
+8 output PSRAM allocation failed; 9 rotated JPEG encoding failed;
+10 encoded output exceeds 256 KiB; 11 rotated JPEG invalid.
+
+Things also names its own invalid UART image size, receive-buffer allocation,
+received JPEG validation and 30-second UART response timeout failures. It
+publishes `capture_failed` with sample sequence, reason and code through MQTT
+so Edge logs `CAPTURE FAILED node=... seq=... code=... reason=...`.
+An unknown reason code remains visible numerically. It never becomes a pump
+state. Events cannot reach Edge while MQTT is disconnected.
+
+A UART write failure after IMG0 has started cannot reliably send an ERR1 frame
+inside the image body; S3 logs that transmission failure locally and Things
+reports receive timeout/invalid JPEG. No capture failure is reported as success.
+Builds and offline routing tests do not establish the specific hardware cause
+of a previous capture failure; reproduce after reflashing to obtain its code.

@@ -2,21 +2,27 @@
 
 Implemented on 2026-11-22. Firmware compiles for the existing `esp32dev` controller; the separate ESP32-S3 camera is unchanged. Hardware actuation and a live broker outage have not been tested.
 
-## Enable for a calibrated node
+## Automatic fallback for every node
 
 Update Edge and Things together. Legacy Things firmware cannot acknowledge the new configuration and will remain blocked from new Edge pump starts. Configuration and heartbeat use the same broker as existing telemetry. Use an authenticated broker with per-node ACLs before enabling fallback; the current public broker configuration does not establish configuration ownership.
 
-Edit `AI/fallback_policies.json`, replacing the example node identifier with the real one. All numbers below are illustrative and must be checked against the sensor scale, substrate and pump:
+Every discovered node with a valid profile automatically receives a fallback
+configuration. No per-node opt-in or `enabled` entry is needed; an empty
+`{"nodes": {}}` or a missing limits file uses defaults for all nodes. Auto OFF
+still disables automatic irrigation, including fallback. Manual stop locks remain
+in force on the node.
+
+`AI/fallback_policies.json` is optional and only overrides per-node thresholds,
+durations and safety limits. For example: All numbers below are illustrative and must be checked against the sensor scale, substrate and pump:
 
 ```json
 {
   "nodes": {
     "YOUR_NODE_ID": {
-      "enabled": false,
       "emergency_threshold_pct": 15.0,
       "rearm_threshold_pct": 20.0,
       "duration_ms": 6000,
-      "cooldown_ms": 300000,
+      "cooldown_ms": 30000,
       "required_low_samples": 3,
       "max_sample_age_ms": 30000,
       "edge_timeout_ms": 30000,
@@ -28,7 +34,11 @@ Edit `AI/fallback_policies.json`, replacing the example node identifier with the
 }
 ```
 
-Enable only after calibration by setting `enabled` to true and enabling auto irrigation for that node. Missing nodes default to fallback off. PWP, MADP and FC are read from the current node profile. An omitted emergency threshold defaults to the midpoint of PWP and MADP; an omitted rearm threshold defaults to MADP. Require `PWP < emergency < MADP`, `emergency < rearm <= FC`, and finite percentages in 0–100. Each run is at most 60000 ms. A malformed policy file revokes enabled configurations on the next successful sync; a disconnected node continues using its last stored valid configuration.
+Fallback is automatically enabled whenever that node's Auto permission is ON.
+Legacy per-node `enabled` fields are ignored, including `false`: they no longer
+select which nodes have fallback. Calibrate the node profile and tune limits as
+needed. Invalid limits disable the affected node until corrected; a malformed
+limits file disables fallback for all nodes on the next configuration sync. PWP, MADP and FC are read from the current node profile. An omitted emergency threshold defaults to the midpoint of PWP and MADP; an omitted rearm threshold defaults to MADP. Require `PWP < emergency < MADP`, `emergency < rearm <= FC`, and finite percentages in 0–100. Each run is at most 60000 ms. A malformed policy file revokes enabled configurations on the next successful sync; a disconnected node continues using its last stored valid configuration.
 
 These are durations, not measured water volumes. A manual stop persists a fallback lock in NVS. To explicitly release the lock, increase `unlock_generation` for that node and let the new configuration synchronize; restarting Edge or merely enabling auto does not release the lock. Do not decrease this counter.
 
@@ -61,3 +71,26 @@ Keep `fallback_state.json` with the deployment. Deleting it loses Edge's configu
 Run Edge tests from `AI` with the project virtual environment and `Cloud Edge` on `PYTHONPATH`. Build the controller with `platformio run -d Things`. These commands do not flash hardware.
 
 Before enabling fallback, perform supervised hardware tests for missing heartbeat, sensor fault, no moisture recovery, cooldown/budget exhaustion, stop then network loss, restart during a run, full journal and reconnect during actuation. Verify GPIO output duration as well as events. Compile/test success does not establish actual flow or live end-to-end behavior.
+
+Existing disabled snapshots automatically get a new configuration version after
+Edge restart/reload. Each node must acknowledge that version before normal Edge
+control is ready. This change does not require a new firmware protocol: Things
+already stores the configuration in NVS and applies its own offline conditions.
+It cannot safely initialize thresholds before ever receiving a valid profile;
+a first-time node needs one successful sync before autonomous fallback is ready.
+
+Model quarantine is separate from control readiness. Connection-loss simulation
+can start during that 30-minute period once config/audit sync is fresh, pump OFF
+is confirmed and no pump command is pending. The quarantine still applies to
+model inference; node-local irrigation safeguards are unchanged.
+
+Default pump cooldown is 30,000 ms (30 seconds), measured from the last pump stop. Edge sends a new config version when this value changes; the node must apply it before the shorter interval takes effect.
+
+## Hourly run-count limit removed
+
+Things no longer rejects pump starts based on `max_runs_per_hour`. The legacy
+configuration field and NVS run counter are retained for wire/storage
+compatibility, but the count does not authorize or reject a run. Reflash Things
+to apply this change. The configured cumulative duration budget (default
+60,000 ms), cooldown (default 30 seconds), per-run 60,000 ms cap and fallback
+dry-episode conditions still apply.

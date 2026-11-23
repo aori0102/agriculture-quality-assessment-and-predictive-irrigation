@@ -399,8 +399,11 @@ void handleCameraResponse() {
     if (cameraClient.hasError()) {
 
         Serial.println();
-        Serial.println("[CAMERA] Capture failed!");
+        Serial.printf("[CAMERA] Capture failed: seq=%lu code=%lu reason=%s\n",
+            (unsigned long)cameraClient.sampleSequence(), (unsigned long)cameraClient.errorCode(), cameraClient.errorReason());
 
+        mqttClient.publishEvent("capture_failed", cameraClient.sampleSequence(),
+            cameraClient.errorReason(), cameraClient.errorCode());
         cameraClient.reset();
     }
 }
@@ -464,22 +467,6 @@ void handleTelemetry() {
     // 6. Print telemetry.
     // ---------------------------------------------
 
-    Serial.println();
-    Serial.println("========== TELEMETRY ==========");
-
-    Serial.print("[TELEMETRY] Sample sequence: ");
-    Serial.println(sampleSequence);
-
-    Serial.print("[TELEMETRY] Interval: ");
-    Serial.print(config.telemetryIntervalMs);
-    Serial.println(" ms");
-
-    Serial.print("[MQTT] Telemetry topic: ");
-    Serial.println(telemetryTopic);
-
-    Serial.println("[MQTT] Payload:");
-    Serial.println(payload);
-
     // ---------------------------------------------
     // 7. Publish telemetry.
     // ---------------------------------------------
@@ -487,18 +474,13 @@ void handleTelemetry() {
     bool telemetryPublished =
         mqttClient.publishTelemetry(payload);
 
-    if (telemetryPublished) {
+    const String soil = telemetry.soilValid ? String(telemetry.soilIndexPct, 1) : "invalid";
+    const String temp = telemetry.dhtValid ? String(telemetry.temperatureC, 1) : "invalid";
+    const String humidity = telemetry.dhtValid ? String(telemetry.airHumidityPct, 1) : "invalid";
+    Serial.printf("[TELEM] seq=%lu soil=%s temp=%s rh=%s mqtt=%s\n",
+        (unsigned long)sampleSequence, soil.c_str(), temp.c_str(), humidity.c_str(),
+        telemetryPublished ? "queued" : "failed");
 
-        Serial.println(
-            "[TELEMETRY] Publish request accepted!"
-        );
-    }
-    else {
-
-        Serial.println(
-            "[TELEMETRY] Publish request failed!"
-        );
-    }
 }
 
 
@@ -670,9 +652,6 @@ void initializeMQTT() {
 
     mqttClient.setPumpCommandCallback([](uint32_t durationMs) {
 
-        Serial.println();
-        Serial.println("[COMMAND] Starting water pump...");
-
         const bool started = nodeFallback.start(durationMs);
         if (started) pumpController.takeStateChange();
         return started;
@@ -682,6 +661,10 @@ void initializeMQTT() {
         pumpController.takeStateChange();
     });
     mqttClient.setPumpStateCallback([]() { return pumpController.isRunning(); });
+    mqttClient.setPumpStartRejectedCallback([](const String& commandId) {
+        mqttClient.publishPumpStartRejected(commandId, nodeFallback.lastStartError,
+            nodeFallback.lastStartDetail, nodeFallback.lastStartRetryMs);
+    });
 
     // ---------------------------------------------
     // 3. Initialize MQTT.

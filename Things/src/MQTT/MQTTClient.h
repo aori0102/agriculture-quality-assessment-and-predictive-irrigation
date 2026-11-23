@@ -14,6 +14,7 @@ private:
     std::deque<std::pair<String, String>> m_controlQueue;
     std::function<void(const String&, const String&)> m_controlCallback;
     String m_configTopic, m_heartbeatTopic, m_ackTopic;
+    String m_debugTopic;
 
     String m_edgeId;
     String m_host;
@@ -28,6 +29,8 @@ private:
     String m_bootId;
     String m_activeRunId;
     uint32_t m_eventSequence = 0;
+    bool m_hasSerialPumpState = false;
+    bool m_serialPumpOn = false;
 
     // Incoming command buffer.
     String m_incomingTopic;
@@ -54,6 +57,7 @@ private:
     std::function<bool(uint32_t)> m_pumpCommandCallback;
     std::function<void()> m_stopPumpCallback;
     std::function<bool()> m_pumpStateCallback;
+    std::function<void(const String&)> m_pumpStartRejectedCallback;
 
     void connect();
 
@@ -95,10 +99,12 @@ public:
     void setStopPumpCallback(std::function<void()> callback);
     void setPumpStateCallback(std::function<bool()> callback);
     bool publishPumpState(bool isOn, const String& commandId = "");
+    void setPumpStartRejectedCallback(std::function<void(const String&)> fn) { m_pumpStartRejectedCallback = fn; }
+    bool publishPumpStartRejected(const String& commandId, const char* reason, const String& detail, uint32_t retryMs);
 
     bool isConnected() const;
 
-    bool publishEvent(const char* event, uint32_t sampleSeq = 0);
+    bool publishEvent(const char* event, uint32_t sampleSeq = 0, const char* reason = nullptr, uint32_t errorCode = 0);
 
     bool publishTelemetry(const String& payload);
 

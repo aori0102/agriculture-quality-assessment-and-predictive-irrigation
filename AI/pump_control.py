@@ -12,6 +12,8 @@ from command_proxy import command_proxy
 from operation_log_manager import operation_log_manager
 from cloud_reporter import cloud_reporter
 from node_fallback import control_ready
+from edge_logging import get_logger
+logger = get_logger("PUMP")
 
 
 class PumpCoordinator:
@@ -51,16 +53,43 @@ class PumpCoordinator:
 
     def _send(self, node_id, action, duration_ms=0):
         if action is ActionIndex.StartPump and not control_ready(node_id):
+            logger.warning("COMMAND BLOCKED node=%s action=%s reason=config_audit_not_ready", node_id, action.value)
             self._detail(node_id, "unknown: awaiting fallback configuration and audit reconciliation")
             return False
         command_id = uuid4().hex
         if not command_proxy.send_command(node_id, action, ttl_ms=self.ttl_ms,
                                           duration_ms=duration_ms, command_id=command_id):
+            logger.warning("COMMAND NOT SENT node=%s action=%s id=%s reason=mqtt_not_queued", node_id, action.value, command_id)
             self._detail(node_id, "unknown: local MQTT command was not queued")
             return False
         self.pending[node_id] = (command_id, action.value, monotonic() + self.ack_timeout)
+        logger.info("COMMAND PENDING node=%s action=%s id=%s ack_timeout_ms=%s",
+                    node_id, action.value, command_id, round(self.ack_timeout * 1000))
         self._detail(node_id, "pending: " + action.value)
         return True
+
+    def request_debug_start(self, node_id, duration_ms):
+        """Explicit debug actuation uses the normal manual safety/ACK path."""
+        def blocked(reason):
+            logger.warning("DEBUG PUMP NOT SENT node=%s reason=%s", node_id, reason)
+            return False
+        if type(duration_ms) is not int or not 0 < duration_ms <= self.max_duration_ms:
+            return blocked("invalid_duration")
+        with self.lock:
+            if node_id not in operation_log_manager.load_log()["node_profile"]:
+                return blocked("unknown_node")
+            if node_id in self.pending:
+                return blocked("previous_command_pending")
+            if self.confirmed.get(node_id) is True:
+                return blocked("pump_already_on")
+            if self.confirmed.get(node_id) is not False:
+                return blocked("pump_state_unknown_wait_for_OFF")
+            if monotonic() - self.last_event_at.get(node_id, -float('inf')) >= 15:
+                return blocked("pump_OFF_state_stale_wait_for_fresh_state")
+            if not control_ready(node_id):
+                return blocked("config_or_audit_sync_not_ready")
+            # A debug action does not persistently change the user's Auto setting.
+            return self._send(node_id, ActionIndex.StartPump, duration_ms)
 
     def request_manual(self, node_id, requested_on):
         if type(requested_on) is not bool:
@@ -136,8 +165,10 @@ class PumpCoordinator:
             finally:
                 self.events.task_done()
         with self.lock:
-            for node_id, (_, _, deadline) in tuple(self.pending.items()):
+            for node_id, (command_id, action, deadline) in tuple(self.pending.items()):
                 if monotonic() >= deadline:
+                    logger.warning("COMMAND UNCONFIRMED node=%s action=%s id=%s reason=ack_timeout | no automatic retry",
+                                   node_id, action, command_id)
                     self.pending.pop(node_id)
                     self.confirmed.pop(node_id, None)
                     self.restore_auto.discard(node_id)
@@ -160,6 +191,25 @@ class PumpCoordinator:
             previous = self.last_sequence.get(node_id)
             if previous is not None and previous[0] == boot and sequence <= previous[1]:
                 return
+            if data.get("event") == "pump_start_rejected":
+                pending = self.pending.get(node_id)
+                if (pending is None or pending[1] != ActionIndex.StartPump.value
+                        or data.get("command_id") != pending[0]):
+                    return
+                reason, detail, retry = data.get("reason"), data.get("detail"), data.get("retry_after_ms")
+                reasons = {"storage_unavailable", "pump_already_running", "cooldown", "hourly_run_limit",
+                           "hourly_duration_limit", "invalid_duration", "audit_journal_full",
+                           "state_persist_failed", "pwm_uninitialized", "pwm_duty_zero", "none"}
+                if (not isinstance(reason, str) or reason not in reasons or not isinstance(detail, str) or len(detail) > 256
+                        or not detail.isprintable() or type(retry) is not int or not 0 <= retry <= 3600000):
+                    return
+                self.last_sequence[node_id] = (boot, sequence)
+                self.pending.pop(node_id)
+                logger.warning("START REJECTED node=%s reason=%s detail=%s retry_after_ms=%s",
+                               node_id, reason, detail, retry)
+                logger.warning("COMMAND RESULT node=%s id=%s result=rejected reason=%s", node_id, data.get("command_id"), reason)
+                self._detail(node_id, ("rejected: " + reason + "; " + detail)[:128])
+                return  # A rejection says nothing new about physical ON/OFF state.
             self.last_sequence[node_id] = (boot, sequence)
             state = data["event"] == "pump_started"
             pending = self.pending.get(node_id)
@@ -169,6 +219,7 @@ class PumpCoordinator:
                 if state != expected:
                     return
                 self.pending.pop(node_id)
+                logger.info("COMMAND RESULT node=%s id=%s result=confirmed_%s", node_id, command_id, "ON" if state else "OFF")
             elif pending is not None and state:
                 return
             self.last_event_at[node_id] = monotonic()
